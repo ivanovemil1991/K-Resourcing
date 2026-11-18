@@ -19,15 +19,15 @@ public class AuditingTests
     {
         var options = new DbContextOptionsBuilder<ClaimsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
-        await using var context = new ClaimsDbContext(options);
+        await using var context = new ClaimsDbContext(options, TestData.Encryptor);
         var now = new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero);
         var auditer = new OutboxAuditer(context, new FixedTimeProvider(now), NullLogger<OutboxAuditer>.Instance);
 
-        auditer.AuditClaim("claim-1", AuditAction.Created);
+        auditer.AuditClaim(TestData.Id(1), AuditAction.Created);
 
         var entry = Assert.Single(context.ChangeTracker.Entries<OutboxEntry>());
         Assert.Equal(EntityState.Added, entry.State);
-        Assert.Equal(("Claim", "claim-1", "POST", now.UtcDateTime),
+        Assert.Equal(("Claim", TestData.Id(1), "POST", now.UtcDateTime),
             (entry.Entity.Entity, entry.Entity.EntityId, entry.Entity.HttpRequestType, entry.Entity.OccurredAtUtc));
         Assert.False(await context.Set<OutboxEntry>().AnyAsync(TestContext.Current.CancellationToken));
     }
@@ -36,14 +36,14 @@ public class AuditingTests
     public async Task Auditer_maps_actions_to_http_request_types()
     {
         await using var context = new ClaimsDbContext(new DbContextOptionsBuilder<ClaimsDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options, TestData.Encryptor);
         var auditer = new OutboxAuditer(context, TimeProvider.System, NullLogger<OutboxAuditer>.Instance);
 
-        auditer.AuditCover("cover-1", AuditAction.Deleted);
+        auditer.AuditCover(TestData.Id(1), AuditAction.Deleted);
 
         var entry = Assert.Single(context.ChangeTracker.Entries<OutboxEntry>()).Entity;
         Assert.Equal(("Cover", "DELETE"), (entry.Entity, entry.HttpRequestType));
-        Assert.Throws<ArgumentOutOfRangeException>(() => auditer.AuditClaim("claim-1", (AuditAction)99));
+        Assert.Throws<ArgumentOutOfRangeException>(() => auditer.AuditClaim(TestData.Id(1), (AuditAction)99));
     }
 
     [Fact]
@@ -52,14 +52,14 @@ public class AuditingTests
         var occurred = new DateTime(2030, 1, 1, 12, 0, 0, DateTimeKind.Utc);
         OutboxEntry Entry(string entity) => new()
         {
-            Id = "event-1", Entity = entity, EntityId = "id-1", HttpRequestType = "DELETE", OccurredAtUtc = occurred
+            Id = TestData.Id(7), Entity = entity, EntityId = TestData.Id(8), HttpRequestType = "DELETE", OccurredAtUtc = occurred
         };
 
         var claim = Assert.IsType<ClaimAudit>(AuditOutboxRelay.ToAuditRecord(Entry("Claim")));
         var cover = Assert.IsType<CoverAudit>(AuditOutboxRelay.ToAuditRecord(Entry("Cover")));
 
-        Assert.Equal(("id-1", "DELETE", occurred), (claim.ClaimId, claim.HttpRequestType, claim.Created));
-        Assert.Equal(("id-1", "DELETE", occurred), (cover.CoverId, cover.HttpRequestType, cover.Created));
+        Assert.Equal((TestData.Id(8).ToString(), "DELETE", occurred), (claim.ClaimId, claim.HttpRequestType, claim.Created));
+        Assert.Equal((TestData.Id(8).ToString(), "DELETE", occurred), (cover.CoverId, cover.HttpRequestType, cover.Created));
         Assert.Throws<InvalidOperationException>(() => AuditOutboxRelay.ToAuditRecord(Entry("Policy")));
     }
 
@@ -68,12 +68,12 @@ public class AuditingTests
     {
         var options = new DbContextOptionsBuilder<ClaimsDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
-        await using var context = new ClaimsDbContext(options);
+        await using var context = new ClaimsDbContext(options, TestData.Encryptor);
         var auditer = new OutboxAuditer(context, TimeProvider.System, NullLogger<OutboxAuditer>.Instance);
         var repository = new EfRepository<Cover>(context);
         var cover = new Cover
         {
-            Id = "cover-1", StartDate = DateTime.UtcNow.Date,
+            Id = TestData.Id(1), StartDate = DateTime.UtcNow.Date,
             EndDate = DateTime.UtcNow.Date.AddDays(1), Type = CoverType.Yacht, Premium = 1m
         };
         auditer.AuditCover(cover.Id, AuditAction.Created);
@@ -90,15 +90,16 @@ public class AuditingTests
     {
         var entry = new OutboxEntry
         {
-            Id = "event-1", Entity = "Claim", EntityId = "claim-1",
+            Id = TestData.Id(7), Entity = "Claim", EntityId = TestData.Id(1),
             HttpRequestType = "POST", OccurredAtUtc = DateTime.UtcNow
         };
+        MongoGuidConfiguration.Apply();
         var document = entry.ToBsonDocument();
-        Assert.Equal("event-1", document["_id"].AsString);
+        Assert.Equal(TestData.Id(7), document["_id"].AsGuid);
         Assert.Equal("Claim", document["Entity"].AsString);
         var options = new DbContextOptionsBuilder<ClaimsDbContext>()
             .UseMongoDB(new MongoClient("mongodb://localhost:27017"), "Claims").Options;
-        using var context = new ClaimsDbContext(options);
+        using var context = new ClaimsDbContext(options, TestData.Encryptor);
         var entity = context.Model.FindEntityType(typeof(OutboxEntry))!;
 
         Assert.Equal(AutoTransactionBehavior.WhenNeeded, context.Database.AutoTransactionBehavior);

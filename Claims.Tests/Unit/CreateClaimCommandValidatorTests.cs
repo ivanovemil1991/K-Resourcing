@@ -9,7 +9,7 @@ public class CreateClaimCommandValidatorTests
 {
     private static readonly Cover January = new()
     {
-        Id = "cover-1",
+        Id = TestData.Id(1),
         StartDate = new DateTime(2030, 1, 1),
         EndDate = new DateTime(2030, 1, 31),
         Type = CoverType.Yacht,
@@ -69,15 +69,23 @@ public class CreateClaimCommandValidatorTests
     [Fact]
     public async Task Claim_for_an_unknown_cover_is_rejected()
     {
-        var fields = await InvalidFields(Claim(January.StartDate) with { CoverId = "does-not-exist" });
+        var fields = await InvalidFields(Claim(January.StartDate) with { CoverId = Guid.NewGuid() });
 
         Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(fields));
     }
 
     [Fact]
+    public async Task A_name_over_the_length_limit_is_rejected()
+    {
+        var fields = await InvalidFields(Claim(January.StartDate) with { Name = new string('x', CreateClaimCommandValidator.MaxNameLength + 1) });
+
+        Assert.Equal([nameof(CreateClaimCommand.Name)], fields);
+    }
+
+    [Fact]
     public async Task Name_and_cover_id_are_required()
     {
-        var fields = await InvalidFields(Claim(January.StartDate) with { Name = "", CoverId = "" });
+        var fields = await InvalidFields(Claim(January.StartDate) with { Name = "", CoverId = Guid.Empty });
 
         Assert.Equal([nameof(CreateClaimCommand.CoverId), nameof(CreateClaimCommand.Name)], fields.Order());
     }

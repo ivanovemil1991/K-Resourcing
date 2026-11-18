@@ -4,7 +4,7 @@ using Claims.Domain;
 namespace Claims.Application.Claims;
 
 /// <summary>Command: deletes the claim with the given id.</summary>
-public sealed record DeleteClaimCommand(string Id);
+public sealed record DeleteClaimCommand(Guid Id);
 
 /// <summary>Deletes a claim. Returns <c>true</c> if the claim existed.</summary>
 public sealed class DeleteClaimCommandHandler(
@@ -17,10 +17,9 @@ public sealed class DeleteClaimCommandHandler(
     {
         auditer.AuditClaim(command.Id, AuditAction.Deleted);
         var deleted = await claims.DeleteAsync(command.Id, cancellationToken);
-        if (deleted && Guid.TryParse(command.Id, out var claimId))
-            logger.LogInformation("Claim deleted {ClaimId}", claimId);
-        else if (deleted)
-            logger.LogInformation("Claim deleted");
+        if (deleted)
+            logger.LogInformation("Claim deleted {ClaimId}", command.Id);
+
         else
             logger.LogInformation("Claim not found for deletion");
         return deleted;

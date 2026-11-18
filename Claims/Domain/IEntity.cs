@@ -4,5 +4,5 @@ namespace Claims.Domain;
 public interface IEntity
 {
     /// <summary>Unique identifier of the entity.</summary>
-    string Id { get; }
+    Guid Id { get; }
 }

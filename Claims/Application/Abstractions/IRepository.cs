@@ -10,12 +10,12 @@ public interface IRepository<TEntity> where TEntity : class, IEntity
     Task<IReadOnlyList<TEntity>> GetPageAsync(Page page, CancellationToken cancellationToken);
 
     /// <summary>Returns the entity with the given id, or <c>null</c> if it does not exist.</summary>
-    Task<TEntity?> GetByIdAsync(string id, CancellationToken cancellationToken);
+    Task<TEntity?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
     /// <summary>Stores a new entity.</summary>
     Task AddAsync(TEntity entity, CancellationToken cancellationToken);
 
     /// <summary>Deletes the entity with the given id.</summary>
     /// <returns><c>true</c> if the entity existed and was deleted, otherwise <c>false</c>.</returns>
-    Task<bool> DeleteAsync(string id, CancellationToken cancellationToken);
+    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken);
 }

@@ -43,11 +43,11 @@ public class CoversController : ControllerBase
     /// <summary>Returns a single cover.</summary>
     /// <response code="200">The cover.</response>
     /// <response code="404">No cover with this id exists.</response>
-    [HttpGet("{id}")]
+    [HttpGet("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<Cover>> GetById(
-        string id,
+        Guid id,
         [FromServices] IQueryHandler<GetCoverByIdQuery, Cover?> handler,
         CancellationToken cancellationToken)
     {
@@ -74,12 +74,12 @@ public class CoversController : ControllerBase
     /// <summary>Deletes a cover.</summary>
     /// <response code="204">The cover was deleted.</response>
     /// <response code="404">No cover with this id exists.</response>
-    [HttpDelete("{id}")]
+    [HttpDelete("{id:guid}")]
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(
-        string id,
+        Guid id,
         [FromServices] ICommandHandler<DeleteCoverCommand, bool> handler,
         CancellationToken cancellationToken) =>
         await handler.HandleAsync(new DeleteCoverCommand(id), cancellationToken) ? NoContent() : NotFound();

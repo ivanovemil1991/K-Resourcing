@@ -19,7 +19,7 @@ public sealed class CreateClaimCommandHandler(
 
         var claim = new Claim
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = Guid.NewGuid(),
             CoverId = command.CoverId,
             Created = command.Created,
             Name = command.Name,

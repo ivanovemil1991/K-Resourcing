@@ -1,13 +1,18 @@
 using Claims.Domain;
 using Claims.Infrastructure.Auditing;
+using Claims.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using MongoDB.EntityFrameworkCore.Extensions;
 
 namespace Claims.Infrastructure.Persistence;
 
 /// <summary>Maps claims and covers to MongoDB.</summary>
-/// <remarks>Mappings preserve existing document names without adding MongoDB dependencies to the domain.</remarks>
-public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) : DbContext(options)
+/// <remarks>
+/// Mappings preserve existing document names without adding MongoDB dependencies to the domain.
+/// Personal data (the claim name) is encrypted before it is stored. EF caches the model, and with it the encryptor,
+/// so one key is used for the lifetime of the process.
+/// </remarks>
+public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options, IFieldEncryptor encryptor) : DbContext(options)
 {
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -25,7 +30,8 @@ public sealed class ClaimsDbContext(DbContextOptions<ClaimsDbContext> options) :
             claim.ToCollection("claims");
             claim.Property(c => c.CoverId).HasElementName("coverId");
             claim.Property(c => c.Created).HasElementName("created");
-            claim.Property(c => c.Name).HasElementName("name");
+            claim.Property(c => c.Name).HasElementName("name")
+                .HasConversion(name => encryptor.Encrypt(name), stored => encryptor.Decrypt(stored));
             claim.Property(c => c.Type).HasElementName("claimType");
             claim.Property(c => c.DamageCost).HasElementName("damageCost");
         });

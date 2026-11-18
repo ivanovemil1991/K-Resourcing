@@ -15,7 +15,7 @@ public sealed class EfRepository<TEntity>(ClaimsDbContext dbContext) : IReposito
         await Entities.AsNoTracking().OrderBy(entity => entity.Id).Skip(page.Skip).Take(page.Take).ToListAsync(cancellationToken);
 
     /// <inheritdoc />
-    public Task<TEntity?> GetByIdAsync(string id, CancellationToken cancellationToken) =>
+    public Task<TEntity?> GetByIdAsync(Guid id, CancellationToken cancellationToken) =>
         Entities.FirstOrDefaultAsync(entity => entity.Id == id, cancellationToken);
 
     /// <inheritdoc />
@@ -26,7 +26,7 @@ public sealed class EfRepository<TEntity>(ClaimsDbContext dbContext) : IReposito
     }
 
     /// <inheritdoc />
-    public async Task<bool> DeleteAsync(string id, CancellationToken cancellationToken)
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
         var entity = await GetByIdAsync(id, cancellationToken);
         if (entity is null)

@@ -2,6 +2,7 @@ using Claims.Application.Abstractions;
 using Claims.Domain;
 using Claims.Infrastructure.Auditing;
 using Claims.Infrastructure.Persistence;
+using Claims.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,10 @@ public static class InfrastructureServiceCollectionExtensions
     /// <param name="redisConnection">Redis connection string for the shared cover cache; when empty an in-process cache is used.</param>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, string? redisConnection)
     {
+        services.AddSingleton<IFieldEncryptor>(provider =>
+            provider.GetRequiredService<IOptions<EncryptionOptions>>().Value.Key is { Length: > 0 } key
+                ? new AesGcmFieldEncryptor(Convert.FromBase64String(key))
+                : AesGcmFieldEncryptor.CreateEphemeral());
         services.AddDbContext<ClaimsDbContext>((provider, options) =>
             options.UseMongoDB(provider.GetRequiredService<MongoClient>(),
                 provider.GetRequiredService<IOptions<DatabaseOptions>>().Value.MongoDatabaseName));
@@ -34,6 +39,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHostedService<AuditOutboxRelay>();
         services.AddSingleton(provider =>
         {
+            MongoGuidConfiguration.Apply();
             var settings = MongoClientSettings.FromConnectionString(provider.GetRequiredService<DatabaseConnections>().ClaimsMongoDb);
             settings.WriteConcern = WriteConcern.WMajority;
             return new MongoClient(settings);

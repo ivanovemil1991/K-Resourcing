@@ -4,7 +4,7 @@ using Claims.Domain;
 namespace Claims.Application.Covers;
 
 /// <summary>Command: deletes the cover with the given id.</summary>
-public sealed record DeleteCoverCommand(string Id);
+public sealed record DeleteCoverCommand(Guid Id);
 
 /// <summary>Deletes a cover. Returns <c>true</c> if the cover existed.</summary>
 public sealed class DeleteCoverCommandHandler(
@@ -17,10 +17,9 @@ public sealed class DeleteCoverCommandHandler(
     {
         auditer.AuditCover(command.Id, AuditAction.Deleted);
         var deleted = await covers.DeleteAsync(command.Id, cancellationToken);
-        if (deleted && Guid.TryParse(command.Id, out var coverId))
-            logger.LogInformation("Cover deleted {CoverId}", coverId);
-        else if (deleted)
-            logger.LogInformation("Cover deleted");
+        if (deleted)
+            logger.LogInformation("Cover deleted {CoverId}", command.Id);
+
         else
             logger.LogInformation("Cover not found for deletion");
         return deleted;

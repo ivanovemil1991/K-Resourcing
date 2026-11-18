@@ -10,9 +10,12 @@ public sealed class CreateClaimCommandValidator : AbstractValidator<CreateClaimC
     /// <summary>The highest damage cost a single claim may have.</summary>
     public const decimal MaxDamageCost = 100_000m;
 
+    /// <summary>The longest claim name accepted, so that a request cannot store unbounded text.</summary>
+    public const int MaxNameLength = 200;
+
     public CreateClaimCommandValidator(IRepository<Cover> covers)
     {
-        RuleFor(claim => claim.Name).NotEmpty();
+        RuleFor(claim => claim.Name).NotEmpty().MaximumLength(MaxNameLength);
         RuleFor(claim => claim.Type).IsInEnum();
         RuleFor(claim => claim.CoverId).NotEmpty();
 
@@ -23,7 +26,7 @@ public sealed class CreateClaimCommandValidator : AbstractValidator<CreateClaimC
         // Needs the cover from the database, so it is looked up once for both checks.
         RuleFor(claim => claim).CustomAsync(async (claim, context, cancellationToken) =>
         {
-            if (string.IsNullOrEmpty(claim.CoverId))
+            if (claim.CoverId == Guid.Empty)
             {
                 return;
             }

@@ -14,7 +14,7 @@ public class CachedCoverRepositoryTests
 {
     private static readonly Cover Cover = new()
     {
-        Id = "cover-1", StartDate = new DateTime(2030, 1, 1), EndDate = new DateTime(2030, 2, 1), Type = CoverType.Yacht, Premium = 1
+        Id = TestData.Id(1), StartDate = new DateTime(2030, 1, 1), EndDate = new DateTime(2030, 2, 1), Type = CoverType.Yacht, Premium = 1
     };
 
     private readonly CountingRepository _inner = new(new InMemoryRepository<Cover>(Cover));
@@ -51,7 +51,7 @@ public class CachedCoverRepositoryTests
     [Fact]
     public async Task A_created_cover_is_cached_immediately()
     {
-        var created = new Cover { Id = "cover-2", StartDate = Cover.StartDate, EndDate = Cover.EndDate, Type = CoverType.Tanker, Premium = 2 };
+        var created = new Cover { Id = TestData.Id(2), StartDate = Cover.StartDate, EndDate = Cover.EndDate, Type = CoverType.Tanker, Premium = 2 };
 
         await _cached.AddAsync(created, Token);
         await _cached.GetByIdAsync(created.Id, Token);
@@ -72,8 +72,8 @@ public class CachedCoverRepositoryTests
     [Fact]
     public async Task Missing_covers_are_not_cached()
     {
-        await _cached.GetByIdAsync("missing", Token);
-        await _cached.GetByIdAsync("missing", Token);
+        await _cached.GetByIdAsync(TestData.Id(404), Token);
+        await _cached.GetByIdAsync(TestData.Id(404), Token);
 
         Assert.Equal(2, _inner.GetByIdCalls);
     }
@@ -106,7 +106,7 @@ public class CachedCoverRepositoryTests
         public Task<IReadOnlyList<Cover>> GetPageAsync(Page page, CancellationToken cancellationToken) =>
             inner.GetPageAsync(page, cancellationToken);
 
-        public Task<Cover?> GetByIdAsync(string id, CancellationToken cancellationToken)
+        public Task<Cover?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         {
             GetByIdCalls++;
             return inner.GetByIdAsync(id, cancellationToken);
@@ -114,6 +114,6 @@ public class CachedCoverRepositoryTests
 
         public Task AddAsync(Cover entity, CancellationToken cancellationToken) => inner.AddAsync(entity, cancellationToken);
 
-        public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken) => inner.DeleteAsync(id, cancellationToken);
+        public Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken) => inner.DeleteAsync(id, cancellationToken);
     }
 }

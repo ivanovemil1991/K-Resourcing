@@ -35,7 +35,8 @@ public class AuthenticationTests
                     ["Database:AuditSqlServer"] = "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test",
                     ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
                     ["Authentication:Authority"] = Issuer,
-                    ["Authentication:Audience"] = Audience
+                    ["Authentication:Audience"] = Audience,
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32])
                 }));
             builder.ConfigureTestServices(services =>
                 services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, jwt =>
@@ -62,14 +63,14 @@ public class AuthenticationTests
             $"{forbidden.StatusCode}: {string.Join(", ", forbidden.Headers.WwwAuthenticate)}");
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken("claims.read"));
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(quote, null, cancellation)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync("/Covers/example", cancellation)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/Covers/{Guid.NewGuid()}", cancellation)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live", cancellation)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken("claims.write"));
         var invalidCover = new { StartDate = "2000-01-01", EndDate = "2000-01-02", Type = "Yacht" };
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/Covers", invalidCover, cancellation)).StatusCode);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken("Claims.Read", "roles"));
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(quote, null, cancellation)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync("/Covers/example", cancellation)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync($"/Covers/{Guid.NewGuid()}", cancellation)).StatusCode);
     }
 
     private static string CreateToken(string permission, string claimType = "scp") => new JwtSecurityTokenHandler().WriteToken(

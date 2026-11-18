@@ -4,10 +4,10 @@ namespace Claims.Domain;
 public class Claim : IEntity
 {
     /// <inheritdoc />
-    public required string Id { get; init; }
+    public required Guid Id { get; init; }
 
     /// <summary>Id of the <see cref="Cover"/> this claim is filed against.</summary>
-    public required string CoverId { get; init; }
+    public required Guid CoverId { get; init; }
 
     /// <summary>The date the claim was created. Must fall within the period of the related cover.</summary>
     public required DateTime Created { get; init; }

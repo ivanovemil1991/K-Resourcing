@@ -1,3 +1,4 @@
+using Claims.Tests.Fakes;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -14,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using Xunit;
 
@@ -68,6 +70,25 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     }
 
     [Fact]
+    public async Task Claim_names_are_encrypted_in_the_database_and_ids_are_native_uuids()
+    {
+        var cover = await CreateCoverAsync();
+        var request = new CreateClaimCommand(cover.Id, Tomorrow.AddDays(5), "Jane Doe", ClaimType.Fire, 100);
+        var response = await _client.PostAsJsonAsync("/Claims", request, Json, Token);
+        var created = (await response.Content.ReadFromJsonAsync<Claim>(Json, Token))!;
+
+        var databaseName = factory.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.MongoDatabaseName;
+        var stored = await factory.Services.GetRequiredService<MongoClient>().GetDatabase(databaseName)
+            .GetCollection<BsonDocument>("claims").Find(new BsonDocument("_id", new BsonBinaryData(created.Id, GuidRepresentation.Standard))).SingleAsync(Token);
+
+        Assert.Equal("Jane Doe", created.Name);
+        Assert.StartsWith("v1:", stored["name"].AsString);
+        Assert.DoesNotContain("Jane", stored["name"].AsString);
+        Assert.Equal(BsonType.Binary, stored["_id"].BsonType);
+        Assert.Equal(BsonBinarySubType.UuidStandard, stored["_id"].AsBsonBinaryData.SubType);
+    }
+
+    [Fact]
     public async Task An_invalid_claim_returns_400_with_every_broken_rule()
     {
         var cover = await CreateCoverAsync();
@@ -96,8 +117,9 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         var auditContext = scope.ServiceProvider.GetRequiredService<AuditContext>();
 
         // Audit entries are saved after the request returns, so wait for them for a short time.
+        var coverId = cover.Id.ToString();
         var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!await auditContext.CoverAudits.AnyAsync(audit => audit.CoverId == cover.Id, Token))
+        while (!await auditContext.CoverAudits.AnyAsync(audit => audit.CoverId == coverId, Token))
         {
             Assert.True(DateTime.UtcNow < deadline, "The cover audit entry was not saved within 10 seconds.");
             await Task.Delay(100, Token);
@@ -107,7 +129,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     [Fact]
     public async Task Concurrent_relay_attempts_create_only_one_audit_row()
     {
-        var id = Guid.NewGuid().ToString();
+        var id = Guid.NewGuid(); var idText = id.ToString();
         var entry = new OutboxEntry
         {
             Id = id, Entity = "Claim", EntityId = id,
@@ -125,15 +147,15 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         Assert.Single(outcomes, inserted => !inserted);
         await using var verification = factory.Services.CreateAsyncScope();
         var audit = verification.ServiceProvider.GetRequiredService<AuditContext>();
-        Assert.Equal(1, await audit.ClaimAudits.CountAsync(row => row.ClaimId == id, Token));
-        Assert.Equal(1, await audit.AuditReceipts.CountAsync(row => row.Id == id, Token));
+        Assert.Equal(1, await audit.ClaimAudits.CountAsync(row => row.ClaimId == idText, Token));
+        Assert.Equal(1, await audit.AuditReceipts.CountAsync(row => row.Id == idText, Token));
     }
 
     [Fact]
     public async Task Failed_cover_insert_does_not_leave_an_outbox_event()
     {
-        var id = Guid.NewGuid().ToString();
-        var coverId = Guid.NewGuid().ToString();
+        var id = Guid.NewGuid();
+        var coverId = Guid.NewGuid(); var idText = id.ToString();
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ClaimsDbContext>();
@@ -157,7 +179,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         var claims = verification.ServiceProvider.GetRequiredService<ClaimsDbContext>();
         Assert.False(await claims.Set<OutboxEntry>().AnyAsync(entry => entry.Id == id, Token));
         var audit = verification.ServiceProvider.GetRequiredService<AuditContext>();
-        Assert.False(await audit.AuditReceipts.AnyAsync(receipt => receipt.Id == id, Token));
+        Assert.False(await audit.AuditReceipts.AnyAsync(receipt => receipt.Id == idText, Token));
     }
 
     [Fact]
@@ -166,10 +188,10 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         var client = factory.Services.GetRequiredService<MongoClient>();
         var databaseName = "AuditRetry" + Guid.NewGuid().ToString("N");
         var collection = client.GetDatabase(databaseName).GetCollection<OutboxEntry>("auditOutbox");
-        var id = Guid.NewGuid().ToString();
+        var id = Guid.NewGuid();
         await collection.InsertOneAsync(new OutboxEntry
         {
-            Id = id, Entity = "Claim", EntityId = "claim-1",
+            Id = id, Entity = "Claim", EntityId = TestData.Id(1),
             HttpRequestType = "POST", OccurredAtUtc = DateTime.UtcNow
         }, cancellationToken: Token);
 
@@ -187,7 +209,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         {
             await worker.StartAsync(Token);
             var message = await logger.Error.Task.WaitAsync(TimeSpan.FromSeconds(20), Token);
-            Assert.Contains(id, message);
+            Assert.Contains(id.ToString(), message);
             Assert.DoesNotContain("test-only-password", message);
             Assert.Equal(1, await collection.CountDocumentsAsync(item => item.Id == id, cancellationToken: Token));
         }

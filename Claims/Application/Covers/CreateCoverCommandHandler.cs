@@ -19,7 +19,7 @@ public sealed class CreateCoverCommandHandler(
 
         var cover = new Cover
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = Guid.NewGuid(),
             StartDate = command.StartDate,
             EndDate = command.EndDate,
             Type = command.Type,

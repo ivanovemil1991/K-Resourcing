@@ -305,6 +305,35 @@ rollback and concurrent relay attempts with MongoDB and SQL Server containers.
 - **Cover cache (Redis):** claim creation reads its cover every time, so found covers are cached in Redis (`IDistributedCache`, key `claims:<id>`, 5-minute expiry) written to the cache when a cover is created (so it is warm for the first claim) and evicted when it is deleted. Cover changes only go through these two operations, so the cache is rebuilt on every change. All instances share the cache, so a delete is visible everywhere. Covers are never updated. The cache is optional: without `Redis__ConnectionString` an in-memory cache is used, and if Redis is down or slow (500 ms timeout) the error is logged as a warning and the database is used. A missed eviction can leave a deleted cover usable for up to 5 minutes. Missing covers are not cached.
 - **Rate limiting:** the `api` policy (fixed window per caller: Entra `oid`/`sub`, else client IP) is applied with `[EnableRateLimiting]` to `ClaimsController` and `CoversController` and returns `429` beyond 30 requests per second. Health checks are not limited. The limit is per instance, so the effective total grows with the instance count; use Azure API Management or Front Door for a global limit. Behind a proxy the IP is the proxy's unless forwarded headers are configured and trusted.
 - **Indexes:** lookups by id use MongoDB's built-in `_id` index, and paging sorts on it. No endpoint queries claims by `CoverId`, so no extra index is added (it would only slow writes); add one when such a query exists.
+## Security hardening
+
+### Ids and personal data
+- **Ids are native `Guid`s** (stored as standard BSON UUIDs in MongoDB). Routes use `{id:guid}`, so a malformed id is a 400 and ids cannot be guessed from a sequence. SQL audit rows keep the id as text.
+- **Existing string-id documents are not migrated**, so they are unreadable after this change. Acceptable for this assignment; a real system would need a one-off migration.
+- **`Claim.Name` is encrypted at rest** with AES-256-GCM (`FieldEncryption.cs`). Every value has a random nonce and an authentication tag, so equal names look different and tampering is detected. The stored form `v1:<base64>` leaves room for key rotation.
+- The model has **no email or phone fields**; the name is the only personal free text. Any new personal field should use the same value converter in `ClaimsDbContext`.
+- **Key:** `Encryption:Key` is a base64 32-byte key. It is required outside Development (startup fails otherwise) and belongs in Azure Key Vault. In Development a throw-away key is generated, which matches the throw-away local databases.
+- **Trade-off:** encryption is non-deterministic, so names cannot be searched or sorted in the database. Nothing needs that today. Losing the key means losing the names.
+
+### HTTPS and certificates
+- **Development:** `dotnet run` listens on `https://localhost:7052` with the ASP.NET Core development certificate (trust it once with `dotnet dev-certs https --trust`) and redirects HTTP to HTTPS.
+- **Azure (recommended):** TLS is terminated by the ingress (Container Apps / Front Door / App Gateway) with a managed or Key Vault certificate. The container speaks HTTP on 8080 and no redirect is configured, which avoids redirect loops.
+- **Docker / VM without an ingress:** Kestrel serves HTTPS on 8443 from a mounted PFX and redirects HTTP 8080 to it. Create a local test certificate and start:
+  ```powershell
+  dotnet dev-certs https -ep certs\claims.pfx -p "<password>"
+  $env:Https__CertPassword = "<password>"; docker compose up --build
+  ```
+  `certs/` is git-ignored. In production use a CA-issued certificate from Key Vault, never the development certificate, and renew before expiry.
+- HSTS is sent outside Development, so browsers refuse plain HTTP after the first secure visit.
+### Review findings
+Fixed: request bodies are limited to 64 KB, the `Server` header is removed, `X-Content-Type-Options: nosniff` and HSTS (outside Development) are sent, and names are limited to 200 characters. Already in place: authentication cannot be disabled outside Development/Test, Swagger is Development-only, no CORS, logs and error responses carry no exception messages or personal data, and the SQL audit stores ids only.
+
+Still to do by whoever deploys it:
+- Redis in `docker-compose.yml` has no password or TLS (internal network only). Use Azure Cache for Redis with TLS and access keys.
+- The rate limit is keyed on the caller IP; behind a proxy or API Management configure forwarded headers, or every caller shares one bucket.
+- Set `AllowedHosts` to the real host names.
+- Use managed identity or Key Vault references instead of connection strings in app settings, and rely on TLS and encryption at rest from MongoDB Atlas / Azure SQL.
+- There is no per-tenant data isolation: every authorized caller sees every claim.
 ## Logging and tracing
 
 The application writes JSON to stdout. Every log has a `TraceId`: request logs use the

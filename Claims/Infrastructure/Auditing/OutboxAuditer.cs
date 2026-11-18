@@ -7,14 +7,14 @@ namespace Claims.Infrastructure.Auditing;
 public sealed class OutboxAuditer(
     ClaimsDbContext dbContext, TimeProvider timeProvider, ILogger<OutboxAuditer> logger) : IAuditer
 {
-    public void AuditClaim(string claimId, AuditAction action) => Stage("Claim", claimId, action);
-    public void AuditCover(string coverId, AuditAction action) => Stage("Cover", coverId, action);
+    public void AuditClaim(Guid claimId, AuditAction action) => Stage("Claim", claimId, action);
+    public void AuditCover(Guid coverId, AuditAction action) => Stage("Cover", coverId, action);
 
-    private void Stage(string entity, string id, AuditAction action)
+    private void Stage(string entity, Guid id, AuditAction action)
     {
         var entry = new OutboxEntry
         {
-            Id = Guid.NewGuid().ToString(),
+            Id = Guid.NewGuid(),
             Entity = entity,
             EntityId = id,
             HttpRequestType = action switch

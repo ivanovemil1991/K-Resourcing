@@ -10,5 +10,5 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
 USER 1654
-EXPOSE 8080
+EXPOSE 8080 8443
 ENTRYPOINT ["dotnet", "Claims.dll"]

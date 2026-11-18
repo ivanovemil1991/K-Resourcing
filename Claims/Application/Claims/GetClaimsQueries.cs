@@ -15,7 +15,7 @@ public sealed class GetClaimsQueryHandler(IRepository<Claim> claims) : IQueryHan
 }
 
 /// <summary>Query: the claim with the given id.</summary>
-public sealed record GetClaimByIdQuery(string Id);
+public sealed record GetClaimByIdQuery(Guid Id);
 
 /// <summary>Returns the claim, or <c>null</c> if it does not exist.</summary>
 public sealed class GetClaimByIdQueryHandler(

@@ -9,7 +9,7 @@ namespace Claims.Application.Claims;
 /// <param name="Type">What caused the damage.</param>
 /// <param name="DamageCost">The claimed cost of the damage. Cannot exceed 100,000.</param>
 public sealed record CreateClaimCommand(
-    string CoverId,
+    Guid CoverId,
     DateTime Created,
     string Name,
     ClaimType Type,

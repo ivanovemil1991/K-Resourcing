@@ -12,7 +12,7 @@ public class ClaimHandlerTests
 {
     private static readonly Cover ExistingCover = new()
     {
-        Id = "cover-1",
+        Id = TestData.Id(1),
         StartDate = new DateTime(2030, 1, 1),
         EndDate = new DateTime(2030, 12, 31),
         Type = CoverType.Tanker,
@@ -42,7 +42,7 @@ public class ClaimHandlerTests
     {
         var claim = await _create.HandleAsync(ValidRequest(), Token);
 
-        Assert.False(string.IsNullOrWhiteSpace(claim.Id));
+        Assert.NotEqual(Guid.Empty, claim.Id);
         Assert.Equal("Engine fire", claim.Name);
         Assert.Same(claim, Assert.Single(_claims.Stored));
         Assert.Equal(("Claim", claim.Id, AuditAction.Created), Assert.Single(_auditer.Entries));
@@ -63,7 +63,7 @@ public class ClaimHandlerTests
     [Fact]
     public async Task Create_rejects_a_claim_for_an_unknown_cover()
     {
-        var request = ValidRequest() with { CoverId = "does-not-exist" };
+        var request = ValidRequest() with { CoverId = Guid.NewGuid() };
 
         var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
 
@@ -74,11 +74,11 @@ public class ClaimHandlerTests
     public async Task GetClaims_returns_only_the_requested_page_in_id_order()
     {
         var claims = new InMemoryRepository<Claim>(
-            Enumerable.Range(1, 5).Select(i => new Claim { Id = $"c{i}", CoverId = "x", Created = DateTime.UtcNow, Name = "n", Type = ClaimType.Fire, DamageCost = 1 }).ToArray());
+            Enumerable.Range(1, 5).Select(i => new Claim { Id = TestData.Id(i), CoverId = TestData.Id(99), Created = DateTime.UtcNow, Name = "n", Type = ClaimType.Fire, DamageCost = 1 }).ToArray());
 
         var page = await new GetClaimsQueryHandler(claims).HandleAsync(new GetClaimsQuery(new Page(1, 2)), Token);
 
-        Assert.Equal(["c2", "c3"], page.Select(claim => claim.Id));
+        Assert.Equal([TestData.Id(2), TestData.Id(3)], page.Select(claim => claim.Id));
     }
 
     [Fact]
@@ -97,12 +97,12 @@ public class ClaimHandlerTests
     [Fact]
     public async Task Delete_of_an_unknown_claim_returns_false()
     {
-        Assert.False(await _delete.HandleAsync(new DeleteClaimCommand("does-not-exist"), Token));
+        Assert.False(await _delete.HandleAsync(new DeleteClaimCommand(Guid.NewGuid()), Token));
     }
 
     [Fact]
     public async Task GetById_returns_null_for_an_unknown_claim()
     {
-        Assert.Null(await _getById.HandleAsync(new GetClaimByIdQuery("does-not-exist"), Token));
+        Assert.Null(await _getById.HandleAsync(new GetClaimByIdQuery(Guid.NewGuid()), Token));
     }
 }

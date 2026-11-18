@@ -25,9 +25,9 @@ public sealed class CachedCoverRepository(
         inner.GetPageAsync(page, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<Cover?> GetByIdAsync(string id, CancellationToken cancellationToken)
+    public async Task<Cover?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        var cached = await TryCacheAsync(async () => await cache.GetStringAsync(id, cancellationToken));
+        var cached = await TryCacheAsync(async () => await cache.GetStringAsync(CacheKey(id), cancellationToken));
         if (cached is not null)
             return JsonSerializer.Deserialize<Cover>(cached);
 
@@ -45,12 +45,12 @@ public sealed class CachedCoverRepository(
     }
 
     /// <inheritdoc />
-    public async Task<bool> DeleteAsync(string id, CancellationToken cancellationToken)
+    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
         var deleted = await inner.DeleteAsync(id, cancellationToken);
         await TryCacheAsync(async () =>
         {
-            await cache.RemoveAsync(id, cancellationToken);
+            await cache.RemoveAsync(CacheKey(id), cancellationToken);
             return true;
         });
         return deleted;
@@ -60,9 +60,11 @@ public sealed class CachedCoverRepository(
     private Task StoreAsync(Cover cover, CancellationToken cancellationToken) =>
         TryCacheAsync(async () =>
         {
-            await cache.SetStringAsync(cover.Id, JsonSerializer.Serialize(cover), Expiration, cancellationToken);
+            await cache.SetStringAsync(CacheKey(cover.Id), JsonSerializer.Serialize(cover), Expiration, cancellationToken);
             return true;
         });
+
+    private static string CacheKey(Guid id) => id.ToString("N");
 
     private async Task<T?> TryCacheAsync<T>(Func<Task<T>> operation)
     {

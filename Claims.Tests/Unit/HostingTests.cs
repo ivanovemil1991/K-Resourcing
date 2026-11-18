@@ -28,7 +28,8 @@ public class HostingTests
                     ["Database:AuditSqlServer"] = "",
                     ["Database:ClaimsMongoDb"] = "",
                     ["Authentication:Authority"] = "https://login.microsoftonline.com/test/v2.0",
-                    ["Authentication:Audience"] = "test-api"
+                    ["Authentication:Audience"] = "test-api",
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32])
                 }));
         });
 
@@ -50,7 +51,8 @@ public class HostingTests
                     ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
                     ["Database:MongoDatabaseName"] = "Claims",
                     ["Authentication:Authority"] = "https://login.microsoftonline.com/test/v2.0",
-                    ["Authentication:Audience"] = "test-api"
+                    ["Authentication:Audience"] = "test-api",
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32])
                 }));
         });
         using var client = factory.CreateClient();
@@ -72,12 +74,13 @@ public class HostingTests
                 {
                     ["Database:AuditSqlServer"] = "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test",
                     ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32]),
                     ["Authentication:Enabled"] = "false"
                 }));
             builder.ConfigureTestServices(services => services.AddScoped<IQueryHandler<GetCoverByIdQuery, Cover?>, FailingGetCoverById>());
         });
         using var client = factory.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/Covers/test");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/Covers/{Guid.NewGuid()}");
         request.Headers.Add("traceparent", "00-12345678901234567890123456789012-1234567890123456-01");
         var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
@@ -105,6 +108,7 @@ public class HostingTests
                 {
                     ["Database:AuditSqlServer"] = "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test",
                     ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32]),
                     ["Authentication:Enabled"] = "false",
                     ["RateLimiting:PermitLimit"] = "3",
                     ["RateLimiting:WindowSeconds"] = "60"

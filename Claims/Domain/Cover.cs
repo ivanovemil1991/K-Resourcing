@@ -4,7 +4,7 @@ namespace Claims.Domain;
 public class Cover : IEntity
 {
     /// <inheritdoc />
-    public required string Id { get; init; }
+    public required Guid Id { get; init; }
 
     /// <summary>First day of the insurance period.</summary>
     public required DateTime StartDate { get; init; }

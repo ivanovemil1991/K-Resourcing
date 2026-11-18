@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Claims.Api;
 using Claims.Application;
 using Claims.Infrastructure;
+using Claims.Infrastructure.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -13,10 +14,21 @@ using ApiAuthenticationOptions = Claims.Api.AuthenticationOptions;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Claims are small JSON documents: hide the server banner and refuse oversized bodies early.
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.AddServerHeader = false;
+    options.Limits.MaxRequestBodySize = 64 * 1024;
+});
+
 DatabaseConnections? localDatabases = null;
 builder.Services.AddSingleton<IValidateOptions<DatabaseOptions>, DatabaseOptionsValidator>();
 builder.Services.AddOptions<DatabaseOptions>()
     .Bind(builder.Configuration.GetSection("Database"))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<EncryptionOptions>, EncryptionOptionsValidator>();
+builder.Services.AddOptions<EncryptionOptions>()
+    .Bind(builder.Configuration.GetSection("Encryption"))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ApiAuthenticationOptions>, AuthenticationOptionsValidator>();
 builder.Services.AddOptions<ApiAuthenticationOptions>()
@@ -98,6 +110,13 @@ if (databaseOptions.UseLocalContainers)
     localDatabases = await LocalDatabaseContainers.StartAsync();
 
 app.UseExceptionHandler();
+if (!app.Environment.IsDevelopment())
+    app.UseHsts();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    await next();
+});
 app.Use(async (context, next) =>
 {
     await next();
@@ -108,11 +127,15 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 
+// Outside Development the redirect is only active when an HTTPS port is configured (ASPNETCORE_HTTPS_PORT),
+// so a TLS-terminating ingress that talks plain HTTP to the container does not cause a redirect loop.
+if (app.Environment.IsDevelopment() || app.Configuration["HTTPS_PORT"] is not null)
+    app.UseHttpsRedirection();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    app.UseHttpsRedirection();
 }
 
 app.MapControllers();

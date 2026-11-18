@@ -29,7 +29,7 @@ public sealed class AuditOutboxRelay(
 
         // Everything up to the cursor was already attempted in this scan. Failed events are skipped
         // (and retried in the next scan) so that one bad event cannot block the ones behind it.
-        string? cursor = null;
+        Guid? cursor = null;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -55,11 +55,11 @@ public sealed class AuditOutboxRelay(
     }
 
     private static Task<List<OutboxEntry>> ReadBatchAsync(
-        IMongoCollection<OutboxEntry> outbox, string? afterId, CancellationToken cancellationToken)
+        IMongoCollection<OutboxEntry> outbox, Guid? afterId, CancellationToken cancellationToken)
     {
         var filter = afterId is null
             ? Builders<OutboxEntry>.Filter.Empty
-            : Builders<OutboxEntry>.Filter.Gt(entry => entry.Id, afterId);
+            : Builders<OutboxEntry>.Filter.Gt(entry => entry.Id, afterId.Value);
         return outbox.Find(filter).SortBy(entry => entry.Id).Limit(BatchSize).ToListAsync(cancellationToken);
     }
 
@@ -70,7 +70,7 @@ public sealed class AuditOutboxRelay(
         var delivered = 0;
         var duplicates = 0;
         var failures = 0;
-        string? firstFailedId = null;
+        Guid? firstFailedId = null;
         string? firstErrorType = null;
 
         foreach (var entry in batch)
@@ -85,7 +85,7 @@ public sealed class AuditOutboxRelay(
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 failures++;
-                firstFailedId ??= LoggableId(entry.Id);
+                firstFailedId ??= entry.Id;
                 firstErrorType ??= exception.GetType().Name;
             }
         }
@@ -109,7 +109,7 @@ public sealed class AuditOutboxRelay(
         await outbox.DeleteOneAsync(item => item.Id == entry.Id, cancellationToken);
 
         logger.LogDebug(inserted ? "Audit event delivered {AuditId}" : "Duplicate audit event skipped {AuditId}",
-            LoggableId(entry.Id));
+            entry.Id);
         return inserted;
     }
 
@@ -119,7 +119,7 @@ public sealed class AuditOutboxRelay(
     /// </summary>
     public static async Task<bool> SaveToSqlAsync(AuditContext auditContext, OutboxEntry entry, CancellationToken cancellationToken)
     {
-        auditContext.AuditReceipts.Add(new AuditReceipt { Id = entry.Id });
+        auditContext.AuditReceipts.Add(new AuditReceipt { Id = entry.Id.ToString() });
         auditContext.Add(ToAuditRecord(entry));
 
         try
@@ -131,7 +131,7 @@ public sealed class AuditOutboxRelay(
         {
             // A unique-key violation is only a duplicate if the receipt really exists.
             var receiptExists = await auditContext.AuditReceipts.AsNoTracking()
-                .AnyAsync(receipt => receipt.Id == entry.Id, cancellationToken);
+                .AnyAsync(receipt => receipt.Id == entry.Id.ToString(), cancellationToken);
             if (!receiptExists)
                 throw;
             return false;
@@ -144,15 +144,12 @@ public sealed class AuditOutboxRelay(
     {
         "Claim" => new ClaimAudit
         {
-            ClaimId = entry.EntityId, Created = entry.OccurredAtUtc, HttpRequestType = entry.HttpRequestType
+            ClaimId = entry.EntityId.ToString(), Created = entry.OccurredAtUtc, HttpRequestType = entry.HttpRequestType
         },
         "Cover" => new CoverAudit
         {
-            CoverId = entry.EntityId, Created = entry.OccurredAtUtc, HttpRequestType = entry.HttpRequestType
+            CoverId = entry.EntityId.ToString(), Created = entry.OccurredAtUtc, HttpRequestType = entry.HttpRequestType
         },
         _ => throw new InvalidOperationException($"Unknown audit entity: {entry.Entity}")
     };
-
-    /// <summary>Ids are only logged when they are GUIDs, so that malformed input never reaches the logs.</summary>
-    private static string LoggableId(string id) => Guid.TryParse(id, out var guid) ? guid.ToString() : "invalid";
 }

@@ -73,7 +73,7 @@ public class CoverHandlerTests
     [Fact]
     public async Task Delete_of_an_unknown_cover_returns_false()
     {
-        Assert.False(await _delete.HandleAsync(new DeleteCoverCommand("does-not-exist"), Token));
+        Assert.False(await _delete.HandleAsync(new DeleteCoverCommand(Guid.NewGuid()), Token));
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class CoverHandlerTests
         var getById = new GetCoverByIdQueryHandler(_covers, NullLogger<GetCoverByIdQueryHandler>.Instance);
 
         Assert.Same(cover, await getById.HandleAsync(new GetCoverByIdQuery(cover.Id), Token));
-        Assert.Null(await getById.HandleAsync(new GetCoverByIdQuery("does-not-exist"), Token));
+        Assert.Null(await getById.HandleAsync(new GetCoverByIdQuery(Guid.NewGuid()), Token));
     }
 
     [Fact]

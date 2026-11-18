@@ -28,11 +28,11 @@ public class ClaimsController : ControllerBase
     /// <summary>Returns a single claim.</summary>
     /// <response code="200">The claim.</response>
     /// <response code="404">No claim with this id exists.</response>
-    [HttpGet("{id}")]
+    [HttpGet("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<Claim>> GetById(
-        string id,
+        Guid id,
         [FromServices] IQueryHandler<GetClaimByIdQuery, Claim?> handler,
         CancellationToken cancellationToken)
     {
@@ -59,12 +59,12 @@ public class ClaimsController : ControllerBase
     /// <summary>Deletes a claim.</summary>
     /// <response code="204">The claim was deleted.</response>
     /// <response code="404">No claim with this id exists.</response>
-    [HttpDelete("{id}")]
+    [HttpDelete("{id:guid}")]
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(
-        string id,
+        Guid id,
         [FromServices] ICommandHandler<DeleteClaimCommand, bool> handler,
         CancellationToken cancellationToken) =>
         await handler.HandleAsync(new DeleteClaimCommand(id), cancellationToken) ? NoContent() : NotFound();

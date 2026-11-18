@@ -16,7 +16,7 @@ public sealed class GetCoversQueryHandler(IRepository<Cover> covers) : IQueryHan
 }
 
 /// <summary>Query: the cover with the given id.</summary>
-public sealed record GetCoverByIdQuery(string Id);
+public sealed record GetCoverByIdQuery(Guid Id);
 
 /// <summary>Returns the cover, or <c>null</c> if it does not exist.</summary>
 public sealed class GetCoverByIdQueryHandler(
