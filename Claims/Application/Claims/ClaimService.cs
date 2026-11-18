@@ -1,13 +1,13 @@
 using Claims.Application.Abstractions;
-using Claims.Application.Validation;
 using Claims.Domain;
+using FluentValidation;
 
 namespace Claims.Application.Claims;
 
 /// <inheritdoc />
 public sealed class ClaimService(
     IRepository<Claim> claims,
-    IRepository<Cover> covers,
+    IValidator<CreateClaimRequest> validator,
     IAuditer auditer,
     ILogger<ClaimService> logger) : IClaimService
 {
@@ -27,8 +27,7 @@ public sealed class ClaimService(
     /// <inheritdoc />
     public async Task<Claim> CreateAsync(CreateClaimRequest request, CancellationToken cancellationToken)
     {
-        var cover = await covers.GetByIdAsync(request.CoverId, cancellationToken);
-        ValidationException.ThrowIfAny(ClaimValidator.Validate(request, cover));
+        await validator.ValidateAndThrowAsync(request, cancellationToken);
 
         var claim = new Claim
         {

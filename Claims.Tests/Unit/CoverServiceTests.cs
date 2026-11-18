@@ -1,8 +1,8 @@
 using Claims.Application.Abstractions;
 using Claims.Application.Covers;
-using Claims.Application.Validation;
 using Claims.Domain;
 using Claims.Tests.Fakes;
+using FluentValidation;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -17,7 +17,7 @@ public class CoverServiceTests
     private readonly CoverService _service;
 
     public CoverServiceTests() =>
-        _service = new CoverService(_covers, _auditer, new FixedTimeProvider(new DateTimeOffset(Today, TimeSpan.Zero)), NullLogger<CoverService>.Instance);
+        _service = new CoverService(_covers, new CreateCoverRequestValidator(new FixedTimeProvider(new DateTimeOffset(Today, TimeSpan.Zero))), _auditer, NullLogger<CoverService>.Instance);
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -40,7 +40,7 @@ public class CoverServiceTests
 
         var exception = await Assert.ThrowsAsync<ValidationException>(() => _service.CreateAsync(request, Token));
 
-        Assert.Equal(nameof(CreateCoverRequest.StartDate), Assert.Single(exception.Errors).Field);
+        Assert.Equal(nameof(CreateCoverRequest.StartDate), Assert.Single(exception.Errors).PropertyName);
         Assert.Empty(_covers.Stored);
         Assert.Empty(_auditer.Entries);
     }

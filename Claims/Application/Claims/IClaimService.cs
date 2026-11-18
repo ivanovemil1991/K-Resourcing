@@ -12,7 +12,7 @@ public interface IClaimService
     Task<Claim?> GetByIdAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>Validates the request against its cover and stores a new claim.</summary>
-    /// <exception cref="Validation.ValidationException">The request breaks a business rule.</exception>
+    /// <exception cref="FluentValidation.ValidationException">The request breaks a business rule.</exception>
     Task<Claim> CreateAsync(CreateClaimRequest request, CancellationToken cancellationToken);
 
     /// <summary>Deletes a claim.</summary>

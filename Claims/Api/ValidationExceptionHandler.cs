@@ -1,4 +1,4 @@
-using Claims.Application.Validation;
+using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace Claims.Api;
@@ -19,10 +19,10 @@ public sealed class ValidationExceptionHandler(
             return false;
         }
 
-        logger.LogWarning("Request validation rejected with {ErrorCount} errors", validationException.Errors.Count);
+        logger.LogWarning("Request validation rejected with {ErrorCount} errors", validationException.Errors.Count());
         var errorsByField = validationException.Errors
-            .GroupBy(error => error.Field)
-            .ToDictionary(group => group.Key, group => group.Select(error => error.Message).ToArray());
+            .GroupBy(error => error.PropertyName)
+            .ToDictionary(group => group.Key, group => group.Select(error => error.ErrorMessage).ToArray());
 
         httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
 

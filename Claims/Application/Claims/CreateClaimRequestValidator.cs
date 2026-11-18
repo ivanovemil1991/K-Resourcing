@@ -1,0 +1,46 @@
+using Claims.Application.Abstractions;
+using Claims.Domain;
+using FluentValidation;
+
+namespace Claims.Application.Claims;
+
+/// <summary>Validates a <see cref="CreateClaimRequest"/>, including its relation to the cover.</summary>
+public sealed class CreateClaimRequestValidator : AbstractValidator<CreateClaimRequest>
+{
+    /// <summary>The highest damage cost a single claim may have.</summary>
+    public const decimal MaxDamageCost = 100_000m;
+
+    public CreateClaimRequestValidator(IRepository<Cover> covers)
+    {
+        RuleFor(claim => claim.Name).NotEmpty();
+        RuleFor(claim => claim.Type).IsInEnum();
+        RuleFor(claim => claim.CoverId).NotEmpty();
+
+        RuleFor(claim => claim.DamageCost)
+            .GreaterThanOrEqualTo(0).WithMessage("DamageCost cannot be negative.")
+            .LessThanOrEqualTo(MaxDamageCost).WithMessage($"DamageCost cannot exceed {MaxDamageCost:0}.");
+
+        // Needs the cover from the database, so it is looked up once for both checks.
+        RuleFor(claim => claim).CustomAsync(async (claim, context, cancellationToken) =>
+        {
+            if (string.IsNullOrEmpty(claim.CoverId))
+            {
+                return;
+            }
+
+            var cover = await covers.GetByIdAsync(claim.CoverId, cancellationToken);
+            if (cover is null)
+            {
+                context.AddFailure(nameof(claim.CoverId), $"Cover '{claim.CoverId}' does not exist.");
+            }
+            else if (!IsWithinCoverPeriod(claim.Created, cover))
+            {
+                context.AddFailure(nameof(claim.Created), "Created date must be within the period of the related cover.");
+            }
+        });
+    }
+
+    /// <summary>Checks whether the date falls within the cover, including both endpoints.</summary>
+    private static bool IsWithinCoverPeriod(DateTime created, Cover cover) =>
+        created.Date >= cover.StartDate.Date && created.Date <= cover.EndDate.Date;
+}

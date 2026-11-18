@@ -235,18 +235,25 @@ and configure a user-assigned managed identity with ACR pull access. See the
 ## Design and business rules
 
 The project is split into API, application, domain and infrastructure folders. Controllers
-map HTTP to services; services use validators, a premium calculator and repository/auditing
-interfaces. MongoDB mappings stay in infrastructure. Request DTOs prevent clients from
-setting IDs and premiums. Swagger uses XML documentation.
+map HTTP to services; services use FluentValidation validators, a premium calculator and
+repository/auditing interfaces. MongoDB mappings stay in infrastructure. Request DTOs prevent
+clients from setting IDs and premiums. Swagger uses XML documentation.
 
-Validation returns all errors as `400 application/problem+json`:
+Requests are validated with [FluentValidation](https://docs.fluentvalidation.net):
+`CreateClaimRequestValidator` and `CreateCoverRequestValidator` are registered by
+`AddApplication()`, and the services call `ValidateAndThrow(Async)` before doing any work. A
+`ValidationException` is mapped to `400 application/problem+json` with all errors, grouped by
+field. The claim validator is async because it loads the cover (once) to check the cover rules;
+the cover validator gets "today" from the injected `TimeProvider`.
 
 | Entity | Rule | Implementation |
 |---|---|---|
 | Claim | DamageCost ≤ 100 000 | Also rejects negative values. |
 | Claim | Created within the cover period | `StartDate.Date ≤ Created.Date ≤ EndDate.Date`; an unknown `CoverId` is a 400 too. |
+| Claim | Name and CoverId required, valid Type | Added rules: empty values and undefined enum numbers are rejected. |
 | Cover | StartDate not in the past | Compared by date against "today" from the injected `TimeProvider` (UTC). |
 | Cover | Period ≤ 1 year | `EndDate ≤ StartDate.AddYears(1)`; additionally `EndDate > StartDate`. |
+| Cover | Valid Type | Added rule: undefined enum numbers are rejected. |
 
 The `/Covers/compute` endpoint runs the same cover validation, so it cannot quote a premium for a
 cover that could never be created.

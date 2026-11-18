@@ -12,11 +12,11 @@ public interface ICoverService
     Task<Cover?> GetByIdAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>Validates the request and returns the premium, without storing anything.</summary>
-    /// <exception cref="Validation.ValidationException">The request breaks a business rule.</exception>
+    /// <exception cref="FluentValidation.ValidationException">The request breaks a business rule.</exception>
     decimal ComputePremium(CreateCoverRequest request);
 
     /// <summary>Validates the request, calculates the premium and stores a new cover.</summary>
-    /// <exception cref="Validation.ValidationException">The request breaks a business rule.</exception>
+    /// <exception cref="FluentValidation.ValidationException">The request breaks a business rule.</exception>
     Task<Cover> CreateAsync(CreateCoverRequest request, CancellationToken cancellationToken);
 
     /// <summary>Deletes a cover.</summary>

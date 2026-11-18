@@ -1,8 +1,8 @@
 using Claims.Application.Abstractions;
 using Claims.Application.Claims;
-using Claims.Application.Validation;
 using Claims.Domain;
 using Claims.Tests.Fakes;
+using FluentValidation;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -24,7 +24,7 @@ public class ClaimServiceTests
     private readonly ClaimService _service;
 
     public ClaimServiceTests() =>
-        _service = new ClaimService(_claims, new InMemoryRepository<Cover>(ExistingCover), _auditer, NullLogger<ClaimService>.Instance);
+        _service = new ClaimService(_claims, new CreateClaimRequestValidator(new InMemoryRepository<Cover>(ExistingCover)), _auditer, NullLogger<ClaimService>.Instance);
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -49,7 +49,7 @@ public class ClaimServiceTests
 
         var exception = await Assert.ThrowsAsync<ValidationException>(() => _service.CreateAsync(request, Token));
 
-        Assert.Equal(nameof(CreateClaimRequest.DamageCost), Assert.Single(exception.Errors).Field);
+        Assert.Equal(nameof(CreateClaimRequest.DamageCost), Assert.Single(exception.Errors).PropertyName);
         Assert.Empty(_claims.Stored);
         Assert.Empty(_auditer.Entries);
     }
@@ -61,7 +61,7 @@ public class ClaimServiceTests
 
         var exception = await Assert.ThrowsAsync<ValidationException>(() => _service.CreateAsync(request, Token));
 
-        Assert.Equal(nameof(CreateClaimRequest.CoverId), Assert.Single(exception.Errors).Field);
+        Assert.Equal(nameof(CreateClaimRequest.CoverId), Assert.Single(exception.Errors).PropertyName);
     }
 
     [Fact]

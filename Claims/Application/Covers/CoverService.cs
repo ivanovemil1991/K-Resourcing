@@ -1,14 +1,14 @@
 using Claims.Application.Abstractions;
-using Claims.Application.Validation;
 using Claims.Domain;
+using FluentValidation;
 
 namespace Claims.Application.Covers;
 
 /// <inheritdoc />
 public sealed class CoverService(
     IRepository<Cover> covers,
+    IValidator<CreateCoverRequest> validator,
     IAuditer auditer,
-    TimeProvider timeProvider,
     ILogger<CoverService> logger) : ICoverService
 {
     /// <inheritdoc />
@@ -27,7 +27,7 @@ public sealed class CoverService(
     /// <inheritdoc />
     public decimal ComputePremium(CreateCoverRequest request)
     {
-        ValidationException.ThrowIfAny(CoverValidator.Validate(request, Today()));
+        validator.ValidateAndThrow(request);
         return PremiumCalculator.Calculate(request.StartDate, request.EndDate, request.Type);
     }
 
@@ -62,6 +62,4 @@ public sealed class CoverService(
             logger.LogInformation("Cover not found for deletion");
         return deleted;
     }
-
-    private DateOnly Today() => DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
 }
