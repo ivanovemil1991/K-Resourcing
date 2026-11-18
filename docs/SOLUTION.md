@@ -3,6 +3,22 @@
 The sections below cover the design, deployment, assumptions and remaining verification.
 For diagrams of the request, cache and auditing flows see [FLOWS.md](FLOWS.md).
 
+## Review guide
+Read in this order; the rest is plumbing.
+1. `Application/` – the business rules: `CreateClaimCommandValidator`, `CreateCoverCommandValidator`, `PremiumCalculator`, the command/query handlers.
+2. `Infrastructure/Auditing/` – the outbox (`OutboxAuditer`) and its relay (`AuditOutboxRelay`): the part with the hardest failure modes.
+3. `Infrastructure/Persistence/` – `CachedCoverRepository` (cache rules), `ClaimsDbContext` (Guid and encryption mapping).
+4. `Infrastructure/Security/FieldEncryption.cs` and `Program.cs` – encryption, authentication, rate limit, HTTPS.
+
+Behaviours worth knowing:
+- **Breaking change:** ids are now Guids, so documents with the old string ids are not readable. There is no migration.
+- **A cover that still has claims cannot be deleted** (`409 Conflict`). MongoDB has no foreign keys, so the handler checks. Two requests racing (a claim created while its cover is deleted) can still leave a claim without a cover; closing that needs a transaction across both collections, which is not done here.
+- **Premium days** are `endDate − startDate`: the end date itself is not charged.
+- **Relay ordering:** a batch without failures restarts from the oldest event; the cursor is only kept to skip events that failed, so new events never wait behind a long scan.
+- **Cache:** an unreadable cache entry is treated as a miss and rewritten from the database.
+- **Deleting an unknown id** returns 404 but is still audited, because the attempt itself is worth recording.
+- HTTP redirects to HTTPS only when `ASPNETCORE_HTTPS_PORT` is set (see "HTTPS and certificates").
+
 ## How to run
 
 Requirements: .NET 10 SDK and a running Docker engine for the default Development setup
@@ -308,7 +324,7 @@ rollback and concurrent relay attempts with MongoDB and SQL Server containers.
 ## Security hardening
 
 ### Ids and personal data
-- **Ids are native `Guid`s** (stored as standard BSON UUIDs in MongoDB). Routes use `{id:guid}`, so a malformed id is a 400 and ids cannot be guessed from a sequence. SQL audit rows keep the id as text.
+- **Ids are native `Guid`s** (stored as standard BSON UUIDs in MongoDB). Routes use `{id:guid}`, so a malformed id does not match any route (404) and ids cannot be guessed from a sequence. SQL audit rows keep the id as text.
 - **Existing string-id documents are not migrated**, so they are unreadable after this change. Acceptable for this assignment; a real system would need a one-off migration.
 - **`Claim.Name` is encrypted at rest** with AES-256-GCM (`FieldEncryption.cs`). Every value has a random nonce and an authentication tag, so equal names look different and tampering is detected. The stored form `v1:<base64>` leaves room for key rotation.
 - The model has **no email or phone fields**; the name is the only personal free text. Any new personal field should use the same value converter in `ClaimsDbContext`.

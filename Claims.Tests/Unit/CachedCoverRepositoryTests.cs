@@ -28,6 +28,18 @@ public class CachedCoverRepositoryTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task An_unreadable_cache_entry_is_replaced_from_the_database()
+    {
+        var cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        await cache.SetStringAsync(Cover.Id.ToString("N"), "not json", Token);
+
+        var cover = await NewCache(cache).GetByIdAsync(Cover.Id, Token);
+
+        Assert.Equal(Cover.Id, cover!.Id);
+        Assert.Equal(1, _inner.GetByIdCalls);
+    }
+
+    [Fact]
     public async Task Repeated_lookups_read_the_database_once()
     {
         await _cached.GetByIdAsync(Cover.Id, Token);

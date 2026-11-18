@@ -6,22 +6,40 @@ namespace Claims.Application.Covers;
 /// <summary>Command: deletes the cover with the given id.</summary>
 public sealed record DeleteCoverCommand(Guid Id);
 
-/// <summary>Deletes a cover. Returns <c>true</c> if the cover existed.</summary>
+/// <summary>What happened to a cover that was asked to be deleted.</summary>
+public enum DeleteCoverResult
+{
+    Deleted,
+    NotFound,
+
+    /// <summary>Claims still belong to the cover, so deleting it would leave them without one.</summary>
+    InUse
+}
+
+/// <summary>Deletes a cover, unless claims still belong to it.</summary>
 public sealed class DeleteCoverCommandHandler(
     IRepository<Cover> covers,
+    IClaimReferences claimReferences,
     IAuditer auditer,
-    ILogger<DeleteCoverCommandHandler> logger) : ICommandHandler<DeleteCoverCommand, bool>
+    ILogger<DeleteCoverCommandHandler> logger) : ICommandHandler<DeleteCoverCommand, DeleteCoverResult>
 {
     /// <inheritdoc />
-    public async Task<bool> HandleAsync(DeleteCoverCommand command, CancellationToken cancellationToken)
+    public async Task<DeleteCoverResult> HandleAsync(DeleteCoverCommand command, CancellationToken cancellationToken)
     {
-        auditer.AuditCover(command.Id, AuditAction.Deleted);
-        var deleted = await covers.DeleteAsync(command.Id, cancellationToken);
-        if (deleted)
-            logger.LogInformation("Cover deleted {CoverId}", command.Id);
+        if (await claimReferences.AnyForCoverAsync(command.Id, cancellationToken))
+        {
+            logger.LogWarning("Cover {CoverId} not deleted because claims still use it", command.Id);
+            return DeleteCoverResult.InUse;
+        }
 
-        else
+        auditer.AuditCover(command.Id, AuditAction.Deleted);
+        if (!await covers.DeleteAsync(command.Id, cancellationToken))
+        {
             logger.LogInformation("Cover not found for deletion");
-        return deleted;
+            return DeleteCoverResult.NotFound;
+        }
+
+        logger.LogInformation("Cover deleted {CoverId}", command.Id);
+        return DeleteCoverResult.Deleted;
     }
 }

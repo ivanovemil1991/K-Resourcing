@@ -124,6 +124,55 @@ public class HostingTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live", token)).StatusCode);
     }
 
+    [Theory]
+    [InlineData("8443", HttpStatusCode.TemporaryRedirect)]
+    [InlineData(null, HttpStatusCode.OK)]
+    public async Task Http_is_redirected_to_https_only_when_an_https_port_is_configured(string? httpsPort, HttpStatusCode expected)
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Test");
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Database:AuditSqlServer"] = "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test",
+                    ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32]),
+                    ["Authentication:Enabled"] = "false",
+                    ["HTTPS_PORT"] = httpsPort
+                }));
+        });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync("/health/live", TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, response.StatusCode);
+        if (httpsPort is not null)
+            Assert.Equal($"https://localhost:{httpsPort}/health/live", response.Headers.Location?.ToString());
+    }
+
+    [Fact]
+    public async Task A_malformed_id_in_the_route_is_not_found()
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Test");
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Database:AuditSqlServer"] = "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test",
+                    ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
+                    ["Encryption:Key"] = Convert.ToBase64String(new byte[32]),
+                    ["Authentication:Enabled"] = "false"
+                }));
+        });
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/Claims/not-a-guid", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     private sealed class FailingGetCoverById : IQueryHandler<GetCoverByIdQuery, Cover?>
     {
         public Task<Cover?> HandleAsync(GetCoverByIdQuery query, CancellationToken cancellationToken) =>

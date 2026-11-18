@@ -89,6 +89,20 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     }
 
     [Fact]
+    public async Task A_cover_with_claims_cannot_be_deleted_until_they_are_gone()
+    {
+        var cover = await CreateCoverAsync();
+        var claimResponse = await _client.PostAsJsonAsync("/Claims",
+            new CreateClaimCommand(cover.Id, Tomorrow.AddDays(5), "Jane Doe", ClaimType.Fire, 100), Json, Token);
+        var claim = (await claimResponse.Content.ReadFromJsonAsync<Claim>(Json, Token))!;
+
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.DeleteAsync($"/Covers/{cover.Id}", Token)).StatusCode);
+
+        await _client.DeleteAsync($"/Claims/{claim.Id}", Token);
+        Assert.Equal(HttpStatusCode.NoContent, (await _client.DeleteAsync($"/Covers/{cover.Id}", Token)).StatusCode);
+    }
+
+    [Fact]
     public async Task An_invalid_claim_returns_400_with_every_broken_rule()
     {
         var cover = await CreateCoverAsync();

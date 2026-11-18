@@ -21,7 +21,7 @@ public static class ApplicationServiceCollectionExtensions
         services.AddScoped<IQueryHandler<GetClaimByIdQuery, Claim?>, GetClaimByIdQueryHandler>();
 
         services.AddScoped<ICommandHandler<CreateCoverCommand, Cover>, CreateCoverCommandHandler>();
-        services.AddScoped<ICommandHandler<DeleteCoverCommand, bool>, DeleteCoverCommandHandler>();
+        services.AddScoped<ICommandHandler<DeleteCoverCommand, DeleteCoverResult>, DeleteCoverCommandHandler>();
         services.AddScoped<IQueryHandler<GetCoversQuery, IReadOnlyList<Cover>>, GetCoversQueryHandler>();
         services.AddScoped<IQueryHandler<GetCoverByIdQuery, Cover?>, GetCoverByIdQueryHandler>();
         services.AddScoped<IQueryHandler<ComputePremiumQuery, decimal>, ComputePremiumQueryHandler>();

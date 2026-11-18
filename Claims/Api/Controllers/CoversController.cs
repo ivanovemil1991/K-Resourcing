@@ -74,13 +74,20 @@ public class CoversController : ControllerBase
     /// <summary>Deletes a cover.</summary>
     /// <response code="204">The cover was deleted.</response>
     /// <response code="404">No cover with this id exists.</response>
+    /// <response code="409">Claims still belong to the cover; delete them first.</response>
     [HttpDelete("{id:guid}")]
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(
         Guid id,
-        [FromServices] ICommandHandler<DeleteCoverCommand, bool> handler,
+        [FromServices] ICommandHandler<DeleteCoverCommand, DeleteCoverResult> handler,
         CancellationToken cancellationToken) =>
-        await handler.HandleAsync(new DeleteCoverCommand(id), cancellationToken) ? NoContent() : NotFound();
+        await handler.HandleAsync(new DeleteCoverCommand(id), cancellationToken) switch
+        {
+            DeleteCoverResult.Deleted => NoContent(),
+            DeleteCoverResult.InUse => Problem(detail: "Claims still belong to this cover.", statusCode: StatusCodes.Status409Conflict),
+            _ => NotFound()
+        };
 }

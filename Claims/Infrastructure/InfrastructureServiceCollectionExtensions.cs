@@ -27,6 +27,7 @@ public static class InfrastructureServiceCollectionExtensions
             options.UseMongoDB(provider.GetRequiredService<MongoClient>(),
                 provider.GetRequiredService<IOptions<DatabaseOptions>>().Value.MongoDatabaseName));
         services.AddScoped(typeof(IRepository<>), typeof(EfRepository<>));
+        services.AddScoped<IClaimReferences, ClaimReferences>();
         AddCoverCache(services, redisConnection);
         services.AddScoped<IRepository<Cover>>(provider => new CachedCoverRepository(
             new EfRepository<Cover>(provider.GetRequiredService<ClaimsDbContext>()),

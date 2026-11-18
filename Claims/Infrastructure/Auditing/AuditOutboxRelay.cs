@@ -27,8 +27,9 @@ public sealed class AuditOutboxRelay(
     {
         var outbox = mongoClient.GetDatabase(options.Value.MongoDatabaseName).GetCollection<OutboxEntry>("auditOutbox");
 
-        // Everything up to the cursor was already attempted in this scan. Failed events are skipped
-        // (and retried in the next scan) so that one bad event cannot block the ones behind it.
+        // Delivered events are deleted, so a batch without failures needs no cursor: the next read starts
+        // from the beginning and new events are never left waiting. After a failure the cursor skips past
+        // the failed events (retried in the next scan) so one bad event cannot block the ones behind it.
         Guid? cursor = null;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -43,8 +44,8 @@ public sealed class AuditOutboxRelay(
                     continue;
                 }
 
-                cursor = batch[^1].Id;
-                await RelayBatchAsync(outbox, batch, stoppingToken);
+                var failures = await RelayBatchAsync(outbox, batch, stoppingToken);
+                cursor = failures > 0 ? batch[^1].Id : null;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -63,8 +64,8 @@ public sealed class AuditOutboxRelay(
         return outbox.Find(filter).SortBy(entry => entry.Id).Limit(BatchSize).ToListAsync(cancellationToken);
     }
 
-    /// <summary>Relays every event of the batch and logs one summary line per outcome.</summary>
-    private async Task RelayBatchAsync(
+    /// <summary>Relays every event of the batch, logs one summary line per outcome and returns the failure count.</summary>
+    private async Task<int> RelayBatchAsync(
         IMongoCollection<OutboxEntry> outbox, IReadOnlyList<OutboxEntry> batch, CancellationToken cancellationToken)
     {
         var delivered = 0;
@@ -96,6 +97,7 @@ public sealed class AuditOutboxRelay(
         if (failures > 0)
             logger.LogError("Audit relay failed for {FailureCount} events; first {AuditId}, error {ErrorType}; retrying",
                 failures, firstFailedId, firstErrorType);
+        return failures;
     }
 
     /// <summary>Writes one event to SQL, then removes it from the outbox. Returns <c>false</c> for a duplicate.</summary>

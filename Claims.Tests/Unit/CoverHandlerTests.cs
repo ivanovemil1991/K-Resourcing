@@ -13,6 +13,7 @@ public class CoverHandlerTests
     private static readonly DateTime Today = new(2030, 1, 1);
 
     private readonly InMemoryRepository<Cover> _covers = new();
+    private readonly InMemoryRepository<Claim> _claims = new();
     private readonly RecordingAuditer _auditer = new();
     private readonly CreateCoverCommandHandler _create;
     private readonly DeleteCoverCommandHandler _delete;
@@ -22,7 +23,7 @@ public class CoverHandlerTests
     {
         var validator = new CreateCoverCommandValidator(new FixedTimeProvider(new DateTimeOffset(Today, TimeSpan.Zero)));
         _create = new CreateCoverCommandHandler(_covers, validator, _auditer, NullLogger<CreateCoverCommandHandler>.Instance);
-        _delete = new DeleteCoverCommandHandler(_covers, _auditer, NullLogger<DeleteCoverCommandHandler>.Instance);
+        _delete = new DeleteCoverCommandHandler(_covers, new FakeClaimReferences(_claims), _auditer, NullLogger<DeleteCoverCommandHandler>.Instance);
         _compute = new ComputePremiumQueryHandler(validator);
     }
 
@@ -73,7 +74,19 @@ public class CoverHandlerTests
     [Fact]
     public async Task Delete_of_an_unknown_cover_returns_false()
     {
-        Assert.False(await _delete.HandleAsync(new DeleteCoverCommand(Guid.NewGuid()), Token));
+        Assert.Equal(DeleteCoverResult.NotFound, await _delete.HandleAsync(new DeleteCoverCommand(Guid.NewGuid()), Token));
+    }
+
+    [Fact]
+    public async Task Delete_is_refused_while_claims_use_the_cover()
+    {
+        var cover = await _create.HandleAsync(new CreateCoverCommand(Today, Today.AddDays(10), CoverType.Tanker), Token);
+        await _claims.AddAsync(new Claim { Id = Guid.NewGuid(), CoverId = cover.Id, Name = "x", Created = Today, Type = ClaimType.Fire, DamageCost = 1 }, Token);
+        _auditer.Entries.Clear();
+
+        Assert.Equal(DeleteCoverResult.InUse, await _delete.HandleAsync(new DeleteCoverCommand(cover.Id), Token));
+        Assert.Same(cover, Assert.Single(_covers.Stored));
+        Assert.Empty(_auditer.Entries);
     }
 
     [Fact]
@@ -92,7 +105,7 @@ public class CoverHandlerTests
         var cover = await _create.HandleAsync(new CreateCoverCommand(Today, Today.AddDays(10), CoverType.Tanker), Token);
         _auditer.Entries.Clear();
 
-        Assert.True(await _delete.HandleAsync(new DeleteCoverCommand(cover.Id), Token));
+        Assert.Equal(DeleteCoverResult.Deleted, await _delete.HandleAsync(new DeleteCoverCommand(cover.Id), Token));
         Assert.Empty(_covers.Stored);
         Assert.Equal(("Cover", cover.Id, AuditAction.Deleted), Assert.Single(_auditer.Entries));
     }

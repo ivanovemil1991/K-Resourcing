@@ -27,9 +27,14 @@ public sealed class CachedCoverRepository(
     /// <inheritdoc />
     public async Task<Cover?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        var cached = await TryCacheAsync(async () => await cache.GetStringAsync(CacheKey(id), cancellationToken));
+        // A broken cache entry (for example an old format) is treated like a miss and replaced from the database.
+        var cached = await TryCacheAsync(async () =>
+        {
+            var json = await cache.GetStringAsync(CacheKey(id), cancellationToken);
+            return json is null ? null : JsonSerializer.Deserialize<Cover>(json);
+        });
         if (cached is not null)
-            return JsonSerializer.Deserialize<Cover>(cached);
+            return cached;
 
         var cover = await inner.GetByIdAsync(id, cancellationToken);
         if (cover is not null)
