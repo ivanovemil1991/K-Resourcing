@@ -13,8 +13,8 @@ public sealed class InMemoryRepository<TEntity> : IRepository<TEntity> where TEn
 
     public IReadOnlyCollection<TEntity> Stored => _entities.Values;
 
-    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<TEntity>>(_entities.Values.ToList());
+    public Task<IReadOnlyList<TEntity>> GetPageAsync(Page page, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<TEntity>>(_entities.Values.OrderBy(entity => entity.Id).Skip(page.Skip).Take(page.Take).ToList());
 
     public Task<TEntity?> GetByIdAsync(string id, CancellationToken cancellationToken) =>
         Task.FromResult(_entities.GetValueOrDefault(id));

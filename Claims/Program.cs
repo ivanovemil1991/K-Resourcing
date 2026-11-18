@@ -83,8 +83,9 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
+builder.Services.AddRequestRateLimiting();
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure();
+builder.Services.AddInfrastructure(builder.Configuration["Redis:ConnectionString"]);
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("databases", tags: ["ready"], timeout: TimeSpan.FromSeconds(5));
 
@@ -104,6 +105,7 @@ app.Use(async (context, next) =>
         app.Logger.LogWarning("Authorization denied with status {StatusCode}", context.Response.StatusCode);
 });
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())

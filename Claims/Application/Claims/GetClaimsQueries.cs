@@ -3,15 +3,15 @@ using Claims.Domain;
 
 namespace Claims.Application.Claims;
 
-/// <summary>Query: all claims.</summary>
-public sealed record GetClaimsQuery;
+/// <summary>Query: one page of claims.</summary>
+public sealed record GetClaimsQuery(Page Page);
 
-/// <summary>Returns all claims.</summary>
+/// <summary>Returns one page of claims.</summary>
 public sealed class GetClaimsQueryHandler(IRepository<Claim> claims) : IQueryHandler<GetClaimsQuery, IReadOnlyList<Claim>>
 {
     /// <inheritdoc />
     public Task<IReadOnlyList<Claim>> HandleAsync(GetClaimsQuery query, CancellationToken cancellationToken) =>
-        claims.GetAllAsync(cancellationToken);
+        claims.GetPageAsync(query.Page, cancellationToken);
 }
 
 /// <summary>Query: the claim with the given id.</summary>

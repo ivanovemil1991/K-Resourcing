@@ -61,6 +61,32 @@ public class CoverHandlerTests
     }
 
     [Fact]
+    public async Task ComputePremium_quotes_without_storing_or_auditing()
+    {
+        var premium = await _compute.HandleAsync(new ComputePremiumQuery(Today, Today.AddDays(30), CoverType.Yacht), Token);
+
+        Assert.Equal(41_250, premium);
+        Assert.Empty(_covers.Stored);
+        Assert.Empty(_auditer.Entries);
+    }
+
+    [Fact]
+    public async Task Delete_of_an_unknown_cover_returns_false()
+    {
+        Assert.False(await _delete.HandleAsync(new DeleteCoverCommand("does-not-exist"), Token));
+    }
+
+    [Fact]
+    public async Task GetCoverById_returns_the_stored_cover_or_null()
+    {
+        var cover = await _create.HandleAsync(new CreateCoverCommand(Today, Today.AddDays(10), CoverType.Tanker), Token);
+        var getById = new GetCoverByIdQueryHandler(_covers, NullLogger<GetCoverByIdQueryHandler>.Instance);
+
+        Assert.Same(cover, await getById.HandleAsync(new GetCoverByIdQuery(cover.Id), Token));
+        Assert.Null(await getById.HandleAsync(new GetCoverByIdQuery("does-not-exist"), Token));
+    }
+
+    [Fact]
     public async Task Delete_removes_the_cover_and_audits_it()
     {
         var cover = await _create.HandleAsync(new CreateCoverCommand(Today, Today.AddDays(10), CoverType.Tanker), Token);

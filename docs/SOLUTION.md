@@ -1,6 +1,7 @@
 # Claims API – Solution Notes
 
 The sections below cover the design, deployment, assumptions and remaining verification.
+For diagrams of the request, cache and auditing flows see [FLOWS.md](FLOWS.md).
 
 ## How to run
 
@@ -34,7 +35,7 @@ dotnet test -- --filter-class "*PremiumCalculatorTests"   # a single test class
   with trace scopes. Swagger remains Development-only.
 - Audit migrations default to off in Production, so replicas do not all migrate on startup.
   Apply migrations once as a deployment step before starting or updating replicas.
-- A multi-stage `Dockerfile` publishes a non-root container listening on port 8080.
+- A multi-stage `Dockerfile` publishes a non-root container listening on port 8080. `docker-compose.yml` runs that image next to a Redis server (one process per container, so Redis is its own service, not part of the API image); run it with `docker compose up --build` after exporting the four required variables. In Azure use Azure Cache for Redis and set `Redis__ConnectionString`.
   HTTPS is terminated at the Azure ingress; the app does not trust forwarded headers or
   redirect HTTP in Production.
 
@@ -56,6 +57,8 @@ the platform's secret store, never in source control.
 | `Database__UseLocalContainers` | `false` in Production; `true` is allowed only in Development. |
 | `Database__MigrateAuditOnStart` | `false` in Production; run migrations separately. |
 | `Database__AuditPollSeconds` | Delay between outbox scans; defaults to `5`. |
+| `Redis__ConnectionString` | Optional. Redis server for the shared cover cache (for example `redis:6379` or an Azure Cache for Redis string). When empty, each instance uses its own in-memory cache. |
+| `RateLimiting__PermitLimit` / `RateLimiting__WindowSeconds` | Requests per caller per window on the Claims and Covers controllers; default `30` per `1` second. |
 
 ### Deploy and scale
 
@@ -296,6 +299,12 @@ Unit tests cover pricing, validation, handlers, configuration, outbox staging an
 authorization. Integration tests exercise the HTTP API, audit delivery, transaction
 rollback and concurrent relay attempts with MongoDB and SQL Server containers.
 
+### Handling load
+
+- **Paging:** `GET /Claims` and `GET /Covers` accept `skip` (default 0) and `take` (default 50, maximum 100) and return items ordered by id. Out-of-range values return `400`. Offset paging is simple but gets slower for very large `skip` values; switch to a cursor on the id if that matters.
+- **Cover cache (Redis):** claim creation reads its cover every time, so found covers are cached in Redis (`IDistributedCache`, key `claims:<id>`, 5-minute expiry) written to the cache when a cover is created (so it is warm for the first claim) and evicted when it is deleted. Cover changes only go through these two operations, so the cache is rebuilt on every change. All instances share the cache, so a delete is visible everywhere. Covers are never updated. The cache is optional: without `Redis__ConnectionString` an in-memory cache is used, and if Redis is down or slow (500 ms timeout) the error is logged as a warning and the database is used. A missed eviction can leave a deleted cover usable for up to 5 minutes. Missing covers are not cached.
+- **Rate limiting:** the `api` policy (fixed window per caller: Entra `oid`/`sub`, else client IP) is applied with `[EnableRateLimiting]` to `ClaimsController` and `CoversController` and returns `429` beyond 30 requests per second. Health checks are not limited. The limit is per instance, so the effective total grows with the instance count; use Azure API Management or Front Door for a global limit. Behind a proxy the IP is the proxy's unless forwarded headers are configured and trusted.
+- **Indexes:** lookups by id use MongoDB's built-in `_id` index, and paging sorts on it. No endpoint queries claims by `CoverId`, so no extra index is added (it would only slow writes); add one when such a query exists.
 ## Logging and tracing
 
 The application writes JSON to stdout. Every log has a `TraceId`: request logs use the

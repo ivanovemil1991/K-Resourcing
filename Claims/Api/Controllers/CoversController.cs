@@ -1,8 +1,10 @@
+using System.ComponentModel.DataAnnotations;
 using Claims.Application.Abstractions;
 using Claims.Application.Covers;
 using Claims.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Claims.Api.Controllers;
 
@@ -11,6 +13,7 @@ namespace Claims.Api.Controllers;
 [Route("[controller]")]
 [Produces("application/json")]
 [Authorize(Policy = AuthorizationPolicies.Read)]
+[EnableRateLimiting(RateLimitingOptions.PolicyName)]
 public class CoversController : ControllerBase
 {
     /// <summary>Quotes a premium without creating a cover.</summary>
@@ -28,12 +31,14 @@ public class CoversController : ControllerBase
         CancellationToken cancellationToken) =>
         await handler.HandleAsync(new ComputePremiumQuery(startDate, endDate, coverType), cancellationToken);
 
-    /// <summary>Returns all covers.</summary>
+    /// <summary>Returns one page of covers, ordered by id. Use <c>skip</c> and <c>take</c> (at most 100, default 50) to page.</summary>
     [HttpGet]
     public Task<IReadOnlyList<Cover>> GetAll(
         [FromServices] IQueryHandler<GetCoversQuery, IReadOnlyList<Cover>> handler,
-        CancellationToken cancellationToken) =>
-        handler.HandleAsync(new GetCoversQuery(), cancellationToken);
+        CancellationToken cancellationToken,
+        [FromQuery, Range(0, int.MaxValue)] int skip,
+        [FromQuery, Range(1, Page.MaxTake)] int take = Page.DefaultTake) =>
+        handler.HandleAsync(new GetCoversQuery(new Page(skip, take)), cancellationToken);
 
     /// <summary>Returns a single cover.</summary>
     /// <response code="200">The cover.</response>

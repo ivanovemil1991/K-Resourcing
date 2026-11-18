@@ -1,9 +1,12 @@
 using Claims.Application.Abstractions;
+using Claims.Domain;
 using Claims.Infrastructure.Auditing;
 using Claims.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
+using StackExchange.Redis;
 
 namespace Claims.Infrastructure;
 
@@ -12,17 +15,23 @@ public static class InfrastructureServiceCollectionExtensions
 {
     /// <summary>Adds the database contexts, <see cref="IRepository{TEntity}"/> and <see cref="IAuditer"/>.</summary>
     /// <param name="services">The service collection.</param>
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services)
+    /// <param name="redisConnection">Redis connection string for the shared cover cache; when empty an in-process cache is used.</param>
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, string? redisConnection)
     {
         services.AddDbContext<ClaimsDbContext>((provider, options) =>
             options.UseMongoDB(provider.GetRequiredService<MongoClient>(),
                 provider.GetRequiredService<IOptions<DatabaseOptions>>().Value.MongoDatabaseName));
         services.AddScoped(typeof(IRepository<>), typeof(EfRepository<>));
+        AddCoverCache(services, redisConnection);
+        services.AddScoped<IRepository<Cover>>(provider => new CachedCoverRepository(
+            new EfRepository<Cover>(provider.GetRequiredService<ClaimsDbContext>()),
+            provider.GetRequiredService<IDistributedCache>(),
+            provider.GetRequiredService<ILogger<CachedCoverRepository>>()));
 
         services.AddDbContext<AuditContext>((provider, options) =>
             options.UseSqlServer(provider.GetRequiredService<DatabaseConnections>().AuditSqlServer));
         services.AddScoped<IAuditer, OutboxAuditer>();
-        services.AddHostedService<AuditWorker>();
+        services.AddHostedService<AuditOutboxRelay>();
         services.AddSingleton(provider =>
         {
             var settings = MongoClientSettings.FromConnectionString(provider.GetRequiredService<DatabaseConnections>().ClaimsMongoDb);
@@ -31,6 +40,25 @@ public static class InfrastructureServiceCollectionExtensions
         });
 
         return services;
+    }
+
+    private static void AddCoverCache(IServiceCollection services, string? redisConnection)
+    {
+        if (string.IsNullOrWhiteSpace(redisConnection))
+        {
+            services.AddDistributedMemoryCache();
+            return;
+        }
+
+        // A slow or unavailable Redis must not stop the API or make every request wait: the cache is optional.
+        var redis = ConfigurationOptions.Parse(redisConnection);
+        redis.AbortOnConnectFail = false;
+        redis.AsyncTimeout = 500;
+        services.AddStackExchangeRedisCache(options =>
+        {
+            options.ConfigurationOptions = redis;
+            options.InstanceName = "claims:";
+        });
     }
 
     /// <summary>Applies pending EF Core migrations to the audit database.</summary>

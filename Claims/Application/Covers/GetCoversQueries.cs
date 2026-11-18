@@ -4,15 +4,15 @@ using FluentValidation;
 
 namespace Claims.Application.Covers;
 
-/// <summary>Query: all covers.</summary>
-public sealed record GetCoversQuery;
+/// <summary>Query: one page of covers.</summary>
+public sealed record GetCoversQuery(Page Page);
 
-/// <summary>Returns all covers.</summary>
+/// <summary>Returns one page of covers.</summary>
 public sealed class GetCoversQueryHandler(IRepository<Cover> covers) : IQueryHandler<GetCoversQuery, IReadOnlyList<Cover>>
 {
     /// <inheritdoc />
     public Task<IReadOnlyList<Cover>> HandleAsync(GetCoversQuery query, CancellationToken cancellationToken) =>
-        covers.GetAllAsync(cancellationToken);
+        covers.GetPageAsync(query.Page, cancellationToken);
 }
 
 /// <summary>Query: the cover with the given id.</summary>

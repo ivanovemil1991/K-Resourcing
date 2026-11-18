@@ -117,7 +117,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         async Task<bool> Relay()
         {
             await using var scope = factory.Services.CreateAsyncScope();
-            return await AuditWorker.SaveAsync(scope.ServiceProvider.GetRequiredService<AuditContext>(), entry, Token);
+            return await AuditOutboxRelay.SaveToSqlAsync(scope.ServiceProvider.GetRequiredService<AuditContext>(), entry, Token);
         }
 
         var outcomes = await Task.WhenAll(Relay(), Relay());
@@ -177,8 +177,8 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
             .AddDbContext<AuditContext>(options => options.UseSqlServer(
                 "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test-only-password;Connect Timeout=1"))
             .BuildServiceProvider();
-        var logger = new ErrorLogger<AuditWorker>();
-        var worker = new AuditWorker(client, Options.Create(new DatabaseOptions
+        var logger = new ErrorLogger<AuditOutboxRelay>();
+        var worker = new AuditOutboxRelay(client, Options.Create(new DatabaseOptions
         {
             MongoDatabaseName = databaseName, AuditPollSeconds = 1
         }), services.GetRequiredService<IServiceScopeFactory>(), logger);

@@ -71,6 +71,17 @@ public class ClaimHandlerTests
     }
 
     [Fact]
+    public async Task GetClaims_returns_only_the_requested_page_in_id_order()
+    {
+        var claims = new InMemoryRepository<Claim>(
+            Enumerable.Range(1, 5).Select(i => new Claim { Id = $"c{i}", CoverId = "x", Created = DateTime.UtcNow, Name = "n", Type = ClaimType.Fire, DamageCost = 1 }).ToArray());
+
+        var page = await new GetClaimsQueryHandler(claims).HandleAsync(new GetClaimsQuery(new Page(1, 2)), Token);
+
+        Assert.Equal(["c2", "c3"], page.Select(claim => claim.Id));
+    }
+
+    [Fact]
     public async Task Delete_removes_the_claim_and_audits_it()
     {
         var claim = await _create.HandleAsync(ValidRequest(), Token);

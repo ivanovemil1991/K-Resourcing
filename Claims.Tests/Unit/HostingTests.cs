@@ -94,6 +94,32 @@ public class HostingTests
         Assert.Equal("12345678901234567890123456789012", invalidProblem.GetProperty("traceId").GetString());
     }
 
+    [Fact]
+    public async Task Paging_is_bounded_and_callers_are_rate_limited()
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Test");
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Database:AuditSqlServer"] = "Server=127.0.0.1,1;Database=Audit;User Id=test;Password=test",
+                    ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
+                    ["Authentication:Enabled"] = "false",
+                    ["RateLimiting:PermitLimit"] = "3",
+                    ["RateLimiting:WindowSeconds"] = "60"
+                }));
+        });
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/Claims?take=101", token)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/Covers?skip=-1", token)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/Claims?take=0", token)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await client.GetAsync("/Claims?take=0", token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live", token)).StatusCode);
+    }
+
     private sealed class FailingGetCoverById : IQueryHandler<GetCoverByIdQuery, Cover?>
     {
         public Task<Cover?> HandleAsync(GetCoverByIdQuery query, CancellationToken cancellationToken) =>

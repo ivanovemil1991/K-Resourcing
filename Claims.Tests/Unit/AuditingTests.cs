@@ -33,6 +33,37 @@ public class AuditingTests
     }
 
     [Fact]
+    public async Task Auditer_maps_actions_to_http_request_types()
+    {
+        await using var context = new ClaimsDbContext(new DbContextOptionsBuilder<ClaimsDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var auditer = new OutboxAuditer(context, TimeProvider.System, NullLogger<OutboxAuditer>.Instance);
+
+        auditer.AuditCover("cover-1", AuditAction.Deleted);
+
+        var entry = Assert.Single(context.ChangeTracker.Entries<OutboxEntry>()).Entity;
+        Assert.Equal(("Cover", "DELETE"), (entry.Entity, entry.HttpRequestType));
+        Assert.Throws<ArgumentOutOfRangeException>(() => auditer.AuditClaim("claim-1", (AuditAction)99));
+    }
+
+    [Fact]
+    public void Relay_maps_outbox_events_to_the_audit_record_of_their_entity()
+    {
+        var occurred = new DateTime(2030, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        OutboxEntry Entry(string entity) => new()
+        {
+            Id = "event-1", Entity = entity, EntityId = "id-1", HttpRequestType = "DELETE", OccurredAtUtc = occurred
+        };
+
+        var claim = Assert.IsType<ClaimAudit>(AuditOutboxRelay.ToAuditRecord(Entry("Claim")));
+        var cover = Assert.IsType<CoverAudit>(AuditOutboxRelay.ToAuditRecord(Entry("Cover")));
+
+        Assert.Equal(("id-1", "DELETE", occurred), (claim.ClaimId, claim.HttpRequestType, claim.Created));
+        Assert.Equal(("id-1", "DELETE", occurred), (cover.CoverId, cover.HttpRequestType, cover.Created));
+        Assert.Throws<InvalidOperationException>(() => AuditOutboxRelay.ToAuditRecord(Entry("Policy")));
+    }
+
+    [Fact]
     public async Task Repository_saves_the_staged_event_with_the_cover()
     {
         var options = new DbContextOptionsBuilder<ClaimsDbContext>()

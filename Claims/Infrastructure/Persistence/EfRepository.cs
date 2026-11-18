@@ -11,8 +11,8 @@ public sealed class EfRepository<TEntity>(ClaimsDbContext dbContext) : IReposito
     private DbSet<TEntity> Entities => dbContext.Set<TEntity>();
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken) =>
-        await Entities.AsNoTracking().ToListAsync(cancellationToken);
+    public async Task<IReadOnlyList<TEntity>> GetPageAsync(Page page, CancellationToken cancellationToken) =>
+        await Entities.AsNoTracking().OrderBy(entity => entity.Id).Skip(page.Skip).Take(page.Take).ToListAsync(cancellationToken);
 
     /// <inheritdoc />
     public Task<TEntity?> GetByIdAsync(string id, CancellationToken cancellationToken) =>
@@ -31,6 +31,7 @@ public sealed class EfRepository<TEntity>(ClaimsDbContext dbContext) : IReposito
         var entity = await GetByIdAsync(id, cancellationToken);
         if (entity is null)
         {
+            // The handler already staged an audit event; save it so the delete attempt is still audited.
             await dbContext.SaveChangesAsync(cancellationToken);
             return false;
         }

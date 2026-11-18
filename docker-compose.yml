@@ -1,0 +1,25 @@
+# Runs the API next to a Redis server for the shared cover cache.
+# MongoDB and SQL Server are external: export Database__ClaimsMongoDb and Database__AuditSqlServer first.
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  claims:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      Redis__ConnectionString: redis:6379
+      Database__ClaimsMongoDb: ${Database__ClaimsMongoDb:?set the MongoDB replica set connection string}
+      Database__AuditSqlServer: ${Database__AuditSqlServer:?set the SQL Server connection string}
+      Authentication__Authority: ${Authentication__Authority:?set the Entra authority}
+      Authentication__Audience: ${Authentication__Audience:?set the API audience}

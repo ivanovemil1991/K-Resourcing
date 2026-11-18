@@ -1,8 +1,10 @@
+using System.ComponentModel.DataAnnotations;
 using Claims.Application.Abstractions;
 using Claims.Application.Claims;
 using Claims.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Claims.Api.Controllers;
 
@@ -11,14 +13,17 @@ namespace Claims.Api.Controllers;
 [Route("[controller]")]
 [Produces("application/json")]
 [Authorize(Policy = AuthorizationPolicies.Read)]
+[EnableRateLimiting(RateLimitingOptions.PolicyName)]
 public class ClaimsController : ControllerBase
 {
-    /// <summary>Returns all claims.</summary>
+    /// <summary>Returns one page of claims, ordered by id. Use <c>skip</c> and <c>take</c> (at most 100, default 50) to page.</summary>
     [HttpGet]
     public Task<IReadOnlyList<Claim>> GetAll(
         [FromServices] IQueryHandler<GetClaimsQuery, IReadOnlyList<Claim>> handler,
-        CancellationToken cancellationToken) =>
-        handler.HandleAsync(new GetClaimsQuery(), cancellationToken);
+        CancellationToken cancellationToken,
+        [FromQuery, Range(0, int.MaxValue)] int skip,
+        [FromQuery, Range(1, Page.MaxTake)] int take = Page.DefaultTake) =>
+        handler.HandleAsync(new GetClaimsQuery(new Page(skip, take)), cancellationToken);
 
     /// <summary>Returns a single claim.</summary>
     /// <response code="200">The claim.</response>

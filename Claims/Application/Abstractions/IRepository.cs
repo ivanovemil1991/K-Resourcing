@@ -6,8 +6,8 @@ namespace Claims.Application.Abstractions;
 /// <typeparam name="TEntity">The entity type that is stored.</typeparam>
 public interface IRepository<TEntity> where TEntity : class, IEntity
 {
-    /// <summary>Returns all stored entities.</summary>
-    Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken);
+    /// <summary>Returns one page of entities, ordered by id so that pages are stable.</summary>
+    Task<IReadOnlyList<TEntity>> GetPageAsync(Page page, CancellationToken cancellationToken);
 
     /// <summary>Returns the entity with the given id, or <c>null</c> if it does not exist.</summary>
     Task<TEntity?> GetByIdAsync(string id, CancellationToken cancellationToken);
