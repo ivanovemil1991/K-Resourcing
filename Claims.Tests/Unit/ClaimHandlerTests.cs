@@ -1,0 +1,136 @@
+using Claims.Application.Abstractions;
+using Claims.Application.Claims;
+using Claims.Domain;
+using Claims.Tests.Fakes;
+using FluentValidation;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Claims.Tests.Unit;
+
+public class ClaimHandlerTests
+{
+    private static readonly Cover ExistingCover = new()
+    {
+        Id = TestData.Id(1),
+        StartDate = new DateTime(2030, 1, 1),
+        EndDate = new DateTime(2030, 12, 31),
+        Type = CoverType.Tanker,
+        Premium = 1
+    };
+
+    private static readonly DateTimeOffset Now = new(2030, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private readonly InMemoryRepository<Cover> _covers = new(ExistingCover);
+    private readonly InMemoryRepository<Claim> _claims = new();
+    private readonly RecordingAuditer _auditer = new();
+    private readonly CreateClaimCommandHandler _create;
+    private readonly DeleteClaimCommandHandler _delete;
+    private readonly GetClaimByIdQueryHandler _getById;
+
+    public ClaimHandlerTests()
+    {
+        _create = new CreateClaimCommandHandler(_claims, new CreateClaimCommandValidator(_covers, new FixedTimeProvider(Now)), new FakeClaimReferences(_claims, _covers), _auditer, NullLogger<CreateClaimCommandHandler>.Instance);
+        _delete = new DeleteClaimCommandHandler(_claims, _auditer, NullLogger<DeleteClaimCommandHandler>.Instance);
+        _getById = new GetClaimByIdQueryHandler(_claims, NullLogger<GetClaimByIdQueryHandler>.Instance);
+    }
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    private static CreateClaimCommand ValidRequest() =>
+        new(ExistingCover.Id, new DateTime(2030, 3, 1), "Engine fire", ClaimType.Fire, 50_000);
+
+    [Fact]
+    public async Task Create_stores_the_claim_with_a_new_id_and_audits_it()
+    {
+        var claim = await _create.HandleAsync(ValidRequest(), Token);
+
+        Assert.NotEqual(Guid.Empty, claim.Id);
+        Assert.Equal("Engine fire", claim.Name);
+        Assert.Same(claim, Assert.Single(_claims.Stored));
+        Assert.Equal(("Claim", claim.Id, AuditAction.Created), Assert.Single(_auditer.Entries));
+    }
+
+    [Fact]
+    public async Task Create_rejects_an_invalid_claim_and_stores_nothing()
+    {
+        var request = ValidRequest() with { DamageCost = 150_000 };
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
+
+        Assert.Equal(nameof(CreateClaimCommand.DamageCost), Assert.Single(exception.Errors).PropertyName);
+        Assert.Empty(_claims.Stored);
+        Assert.Empty(_auditer.Entries);
+    }
+
+    [Fact]
+    public async Task Create_rejects_a_claim_for_an_unknown_cover()
+    {
+        var request = ValidRequest() with { CoverId = Guid.NewGuid() };
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
+
+        Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(exception.Errors).PropertyName);
+    }
+
+    [Fact]
+    public async Task Create_withdraws_the_claim_when_its_cover_is_deleted_meanwhile()
+    {
+        // The validator still sees the cover, but the database check after the insert no longer finds it.
+        var coversAfterDeletion = new InMemoryRepository<Cover>();
+        var create = new CreateClaimCommandHandler(_claims, new CreateClaimCommandValidator(_covers, new FixedTimeProvider(Now)),
+            new FakeClaimReferences(_claims, coversAfterDeletion), _auditer, NullLogger<CreateClaimCommandHandler>.Instance);
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => create.HandleAsync(ValidRequest(), Token));
+
+        Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(exception.Errors).PropertyName);
+        Assert.Empty(_claims.Stored);
+        Assert.Equal([AuditAction.Created, AuditAction.Deleted], _auditer.Entries.Select(entry => entry.Action));
+    }
+
+    [Fact]
+    public async Task Create_rejects_a_claim_dated_in_the_future()
+    {
+        var request = ValidRequest() with { Created = Now.UtcDateTime.AddDays(1) };
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
+
+        Assert.Equal(nameof(CreateClaimCommand.Created), exception.Errors.First().PropertyName);
+    }
+
+    [Fact]
+    public async Task GetClaims_returns_only_the_requested_page_in_id_order()
+    {
+        var claims = new InMemoryRepository<Claim>(
+            Enumerable.Range(1, 5).Select(i => new Claim { Id = TestData.Id(i), CoverId = TestData.Id(99), Created = DateTime.UtcNow, Name = "n", Type = ClaimType.Fire, DamageCost = 1 }).ToArray());
+
+        var page = await new GetClaimsQueryHandler(claims).HandleAsync(new GetClaimsQuery(new Page(1, 2)), Token);
+
+        Assert.Equal([TestData.Id(2), TestData.Id(3)], page.Select(claim => claim.Id));
+    }
+
+    [Fact]
+    public async Task Delete_removes_the_claim_and_audits_it()
+    {
+        var claim = await _create.HandleAsync(ValidRequest(), Token);
+        _auditer.Entries.Clear();
+
+        var deleted = await _delete.HandleAsync(new DeleteClaimCommand(claim.Id), Token);
+
+        Assert.True(deleted);
+        Assert.Empty(_claims.Stored);
+        Assert.Equal(("Claim", claim.Id, AuditAction.Deleted), Assert.Single(_auditer.Entries));
+    }
+
+    [Fact]
+    public async Task Delete_of_an_unknown_claim_returns_false()
+    {
+        Assert.False(await _delete.HandleAsync(new DeleteClaimCommand(Guid.NewGuid()), Token));
+    }
+
+    [Fact]
+    public async Task GetById_returns_null_for_an_unknown_claim()
+    {
+        Assert.Null(await _getById.HandleAsync(new GetClaimByIdQuery(Guid.NewGuid()), Token));
+    }
+}

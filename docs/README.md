@@ -24,6 +24,7 @@ Good luck! 😊
 # Prerequisites
 
 - Your favourite IDE to code in C# 😊
+- [Solution notes](SOLUTION.md) include configuration, deployment steps and current production limitations.
 - _Optional_ - an Azure Subscription. You can demo this API by hosting it in Azure. If that is not an option for you, you can run the demo having a locally running instance. If you select a different cloud provider, that is fine for us.
 	- _This requires a rewrite of the setup (program.cs) of the application, as it currently depends on TestContainer packages to simplify the local development experience._
 - `Docker Desktop` or a different Docker deamon running on your machine.

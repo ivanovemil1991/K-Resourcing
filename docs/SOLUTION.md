@@ -1,0 +1,394 @@
+# Claims API – Solution Notes
+
+The sections below cover the design, deployment, assumptions and remaining verification.
+For diagrams of the request, cache and auditing flows see [FLOWS.md](FLOWS.md).
+
+## Review guide
+Read in this order; the rest is plumbing.
+1. `Application/` – the business rules: `CreateClaimCommandValidator`, `CreateCoverCommandValidator`, `PremiumCalculator`, the command/query handlers.
+2. `Infrastructure/Auditing/` – the outbox (`OutboxAuditer`) and its relay (`AuditOutboxRelay`): the part with the hardest failure modes.
+3. `Infrastructure/Persistence/` – `CachedCoverRepository` (cache rules), `ClaimsDbContext` (Guid and encryption mapping).
+4. `Infrastructure/Security/FieldEncryption.cs` and `Program.cs` – encryption, authentication, rate limit, HTTPS.
+
+Behaviours worth knowing:
+- **Breaking change:** ids are now Guids, so documents with the old string ids are not readable. There is no migration.
+- **A cover that still has claims cannot be deleted** (`409 Conflict`). MongoDB has no foreign keys, so the handler checks. Two requests racing (a claim created while its cover is deleted) can still leave a claim without a cover; closing that needs a transaction across both collections, which is not done here.
+- **Premium days** are `endDate − startDate`: the end date itself is not charged.
+- **Relay ordering:** a batch without failures restarts from the oldest event; the cursor is only kept to skip events that failed, so new events never wait behind a long scan.
+- **Cache:** an unreadable cache entry is treated as a miss and rewritten from the database.
+- **Deleting an unknown id** returns 404 but is still audited, because the attempt itself is worth recording.
+- HTTP redirects to HTTPS only when `ASPNETCORE_HTTPS_PORT` is set (see "HTTPS and certificates").
+
+## How to run
+
+Requirements: .NET 10 SDK and a running Docker engine for the default Development setup
+and integration tests. Production uses configured external databases instead.
+
+```powershell
+dotnet run --project Claims          # Swagger UI on /swagger (Development environment)
+dotnet test                          # unit + integration tests
+dotnet test -- --filter-class "*PremiumCalculatorTests"   # a single test class
+```
+
+---
+
+## Actions taken: Azure deployment and scaling
+
+- Database connection strings, the MongoDB database name, local containers, migration on
+  startup and outbox polling are configuration settings. Startup validates them;
+  local containers are allowed only in Development. No credentials are committed.
+- Instances share the configured databases and keep no application session state.
+  Claims and covers are saved with their audit outbox entry in one MongoDB transaction.
+  A worker retries delivery to SQL; a unique SQL receipt and the audit row are committed
+  together, so competing replicas and retries cannot create duplicate rows for one event.
+  SQL delivery is eventual, not a distributed transaction across MongoDB and SQL.
+- JWT bearer authentication validates Entra-issued tokens. Read endpoints require
+  `claims.read` or `Claims.Read`; writes require `claims.write` or `Claims.Write`.
+  Write permissions also allow reads. Authentication can be disabled only in Development
+  or Test; the checked-in Development configuration disables it for local use.
+- `/health/live` checks that the process is running. `/health/ready` checks both databases
+  with a five-second timeout; it does not check the audit schema. Logs are JSON on stdout,
+  with trace scopes. Swagger remains Development-only.
+- Audit migrations default to off in Production, so replicas do not all migrate on startup.
+  Apply migrations once as a deployment step before starting or updating replicas.
+- A multi-stage `Dockerfile` publishes a non-root container listening on port 8080. `docker-compose.yml` runs that image next to a Redis server (one process per container, so Redis is its own service, not part of the API image); run it with `docker compose up --build` after exporting the four required variables. In Azure use Azure Cache for Redis and set `Redis__ConnectionString`.
+  HTTPS is terminated at the Azure ingress; the app does not trust forwarded headers or
+  redirect HTTP in Production.
+
+### Required application settings
+
+Use App Service application settings or Container Apps secrets/environment variables.
+Double underscores map to nested configuration; keep connection strings in Key Vault or
+the platform's secret store, never in source control.
+
+| Setting | Purpose |
+|---|---|
+| `ASPNETCORE_ENVIRONMENT` | `Production` for Azure. |
+| `Authentication__Enabled` | `true` in Production (the default). |
+| `Authentication__Authority` | Tenant-specific Entra authority, e.g. `https://login.microsoftonline.com/<tenant-id>/v2.0`. |
+| `Authentication__Audience` | Expected API audience in the access token; use the value configured for the API registration. |
+| `Database__AuditSqlServer` | Azure SQL connection string, including server and database; enable encrypted connections. |
+| `Database__ClaimsMongoDb` | Connection string for a transaction-capable MongoDB replica set, such as MongoDB Atlas on Azure. |
+| `Database__MongoDatabaseName` | MongoDB database name; defaults to `Claims`. |
+| `Database__UseLocalContainers` | `false` in Production; `true` is allowed only in Development. |
+| `Database__MigrateAuditOnStart` | `false` in Production; run migrations separately. |
+| `Database__AuditPollSeconds` | Delay between outbox scans; defaults to `5`. |
+| `Redis__ConnectionString` | Optional. Redis server for the shared cover cache (for example `redis:6379` or an Azure Cache for Redis string). When empty, each instance uses its own in-memory cache. |
+| `RateLimiting__PermitLimit` / `RateLimiting__WindowSeconds` | Requests per caller per window on the Claims and Covers controllers; default `30` per `1` second. |
+
+### Deploy and scale
+
+1. Provision Azure SQL and a MongoDB Atlas replica set on Azure, private networking/firewall
+   access, and credentials with the permissions needed by the app. Pre-create the `claims`,
+   `covers`, and `auditOutbox` collections before accepting traffic. A standalone MongoDB
+   server cannot run the required transactions.
+2. Build and push the image: `docker build -t <registry>/claims:<tag> .`, then
+   `docker push <registry>/claims:<tag>`. Deploy it to Azure App Service for Containers
+   or Azure Container Apps with the settings above and port 8080.
+3. Before routing traffic, run `dotnet ef database update --project Claims --context AuditContext`
+   once from a deployment job with .NET 10, the EF CLI and the same production database settings.
+   The job needs schema-change permissions; use least-privilege runtime credentials separately.
+   When upgrading from the in-memory audit version, drain and stop the old instances before
+   enabling traffic on the new ones; old instances do not write to the outbox.
+4. Register the API in Entra ID, expose `claims.read` and `claims.write` delegated scopes
+   and/or define `Claims.Read` and `Claims.Write` application roles. Grant clients only
+   the necessary permissions and set the authority and audience above.
+5. Require HTTPS at Azure ingress, configure readiness/liveness probes, and scale replicas
+   against the same databases. Monitor readiness, relay errors and the size and age of
+   `auditOutbox`; provision capacity for an extended SQL outage.
+
+### Database compatibility and verification
+
+The [MongoDB EF Core provider](https://www.mongodb.com/docs/entity-framework/current/interact-data/transactions/)
+uses a transaction by default when one `SaveChangesAsync` affects multiple root documents;
+MongoDB's [transaction documentation](https://www.mongodb.com/docs/v8.3/core/transactions/)
+supports transactions across collections on replica sets. [Atlas can deploy a replica set on Azure](https://www.mongodb.com/docs/atlas/cli/current/command/atlas-clusters-create/).
+The app requests majority write concern. The `_id` index on the outbox supports the relay's
+ordered scans, while the SQL receipt primary key provides deduplication. Keep receipts for
+as long as an event might be retried or restored.
+
+RU-based [Cosmos DB for MongoDB 7.0](https://learn.microsoft.com/en-us/azure/cosmos-db/mongodb/feature-support-70)
+does not support cross-collection transactions and is **not supported** by this outbox.
+Microsoft's [Azure DocumentDB transaction guide](https://learn.microsoft.com/en-us/azure/documentdb/how-to-transactions)
+shows multi-document transactions but does not establish this application's cross-collection
+EF provider compatibility; use Atlas pending a separate compatibility test.
+
+The SQL and MongoDB commits are not a single distributed transaction: committed MongoDB
+events remain in the outbox until SQL delivery succeeds. Retries are idempotent per event,
+but HTTP requests themselves have no idempotency key and retrying an ambiguous POST can
+create a second entity. Events may arrive in SQL out of order. Failures are logged and retried; a permanently invalid event needs
+operator investigation. MongoDB transaction errors may surface to the client without
+automatic retries.
+Existing audit events lost before this change cannot be recovered by the outbox.
+
+**Verified locally:** the full test suite passed, including replica-set rollback and concurrent
+SQL relay tests. The container image built and passed hadolint. With local MongoDB and SQL
+containers and a temporary test OIDC issuer, the image passed liveness, readiness, 401,
+authenticated create/read and audit-delivery checks. A local three-node replica-set
+primary stepdown elected a new primary; a subsequent authenticated write and its audit
+were successful. This is not an Azure or Entra test.
+
+**Still unverified:** Real Entra tokens, Atlas on Azure, Azure SQL migration and deployment,
+Azure failover, load, network policies, backups and alerts. Use the runbook below in a
+non-production environment before considering production deployment.
+
+### Azure and real-token verification runbook
+
+These commands have not been run against Azure. They assume PowerShell 7, Azure CLI with
+the Container Apps extension, Atlas CLI, .NET 10 with `dotnet-ef`, Docker, and `sqlcmd`.
+Provision an Azure SQL database, an Azure Container Apps environment, an Azure Container
+Registry and a healthy Atlas M10-or-higher replica set on Azure first. Ensure the app and
+the migration host can reach both databases, pre-create `claims`, `covers` and `auditOutbox`,
+and configure a user-assigned managed identity with ACR pull access. See the
+[Container Apps deployment guide](https://learn.microsoft.com/en-us/azure/container-apps/tutorial-code-to-cloud).
+
+1. Register an Entra API with delegated scopes `claims.read` and `claims.write` (or app
+   roles `Claims.Read` and `Claims.Write`). Grant consent to the client used for testing.
+   Record the tenant ID, API Application ID URI and token audience. For the 403 check,
+   use a separate client or user whose token has read permission but **not** write permission.
+2. Set these values in a trusted, non-production shell. Secrets entered through CLI
+   arguments can be visible to local processes; prefer Key Vault references or a secured
+   deployment pipeline for production. Do not commit credentials or tokens.
+
+   ```powershell
+   $tenant = '<tenant-id>'; $subscription = '<subscription-id>'
+   $group = '<resource-group>'; $environment = '<container-app-environment>'
+   $app = '<container-app-name>'; $acr = '<registry-name>'
+   $identity = '<user-assigned-identity-resource-id>'
+   $apiUri = 'api://<api-app-id>'; $audience = '<expected-access-token-audience>'
+   $mongoDb = 'Claims'; $sqlServer = '<sql-server>.database.windows.net'
+   $sqlDatabase = '<database>'; $sqlUser = '<sql-user>'
+   $sql = Read-Host 'Azure SQL connection string for the app' -AsSecureString | ConvertFrom-SecureString -AsPlainText
+   $mongo = Read-Host 'Atlas connection string for the app' -AsSecureString | ConvertFrom-SecureString -AsPlainText
+   $migrationSql = Read-Host 'Azure SQL connection string with migration permissions' -AsSecureString | ConvertFrom-SecureString -AsPlainText
+   az login --tenant $tenant
+   az account set --subscription $subscription
+   ```
+
+3. Apply the migration once, before routing traffic. The migration identity needs schema
+   permissions; the app identity should have only runtime permissions.
+
+   ```powershell
+   $env:ASPNETCORE_ENVIRONMENT = 'Production'
+   $env:Database__AuditSqlServer = $migrationSql
+   $env:Database__ClaimsMongoDb = $mongo
+   $env:Database__MongoDatabaseName = $mongoDb
+   $env:Authentication__Authority = "https://login.microsoftonline.com/$tenant/v2.0"
+   $env:Authentication__Audience = $audience
+   dotnet ef database update --project Claims --context AuditContext
+   Remove-Item Env:\Database__AuditSqlServer, Env:\Database__ClaimsMongoDb
+   ```
+
+   Expect `Done` and the `AuditReceipts` table. Drain and stop any old in-memory-audit
+   instances before switching traffic.
+4. Build and deploy two or more replicas. This example uses Container Apps secrets;
+   replace them with Key Vault references in a production deployment.
+
+   ```powershell
+   az acr build --registry $acr --image claims:verify .
+   az containerapp create --name $app --resource-group $group --environment $environment `
+     --image "${acr}.azurecr.io/claims:verify" --target-port 8080 --ingress external `
+     --registry-server "${acr}.azurecr.io" --user-assigned $identity --registry-identity $identity `
+     --min-replicas 2 --max-replicas 5 --secrets "sql=$sql" "mongo=$mongo" `
+     --env-vars "ASPNETCORE_ENVIRONMENT=Production" "Database__AuditSqlServer=secretref:sql" `
+       "Database__ClaimsMongoDb=secretref:mongo" "Database__MongoDatabaseName=$mongoDb" `
+       "Authentication__Authority=https://login.microsoftonline.com/$tenant/v2.0" `
+       "Authentication__Audience=$audience" --query properties.provisioningState -o tsv
+   $fqdn = az containerapp show -g $group -n $app --query properties.configuration.ingress.fqdn -o tsv
+   $base = "https://$fqdn"
+   ```
+
+   Expect a running app and two ready replicas. Configure platform HTTPS, health probes
+   (`/health/live`, `/health/ready`) and network restrictions for your environment.
+5. Test real tokens. Grant Azure CLI's client the API delegated permissions first; use
+   separately scoped clients if consent results in a token containing both permissions.
+
+   ```powershell
+   $readToken = az account get-access-token --tenant $tenant --scope "$apiUri/claims.read" --query accessToken -o tsv
+   $writeToken = az account get-access-token --tenant $tenant --scope "$apiUri/claims.write" --query accessToken -o tsv
+   $readHeaders = @{ Authorization = "Bearer $readToken" }
+   $writeHeaders = @{ Authorization = "Bearer $writeToken" }
+   (Invoke-WebRequest "$base/health/live" -SkipHttpErrorCheck).StatusCode   # 200
+   (Invoke-WebRequest "$base/health/ready" -SkipHttpErrorCheck).StatusCode  # 200
+   (Invoke-WebRequest "$base/Covers" -SkipHttpErrorCheck).StatusCode        # 401
+   (Invoke-WebRequest "$base/Covers" -Headers $readHeaders -SkipHttpErrorCheck).StatusCode # 200
+   $start = [DateTime]::UtcNow.Date.AddDays(1)
+   $body = @{ startDate = $start.ToString('yyyy-MM-dd'); endDate = $start.AddDays(2).ToString('yyyy-MM-dd'); type = 'Yacht' } | ConvertTo-Json
+   (Invoke-WebRequest "$base/Covers" -Method Post -Headers $readHeaders -ContentType 'application/json' -Body $body -SkipHttpErrorCheck).StatusCode # 403
+   $created = Invoke-RestMethod "$base/Covers" -Method Post -Headers $writeHeaders -ContentType 'application/json' -Body $body
+   (Invoke-WebRequest "$base/Covers/$($created.id)" -Headers $readHeaders -SkipHttpErrorCheck).StatusCode # 200
+   ```
+
+   Check SQL after the relay runs. With SQL authentication, enter a password without
+   echoing it; expect exactly one `POST` audit for the created cover.
+
+   ```powershell
+   $env:SQLCMDPASSWORD = Read-Host 'SQL password' -AsSecureString | ConvertFrom-SecureString -AsPlainText
+   sqlcmd -S $sqlServer -d $sqlDatabase -U $sqlUser -Q "SELECT COUNT(*) AS AuditCount FROM CoverAudits WHERE CoverId='$($created.id)' AND HttpRequestType='POST'"
+   Remove-Item Env:\SQLCMDPASSWORD
+   ```
+
+6. In the **non-production** Atlas project, use a healthy M10-or-higher cluster and an
+   account with the required project role. Follow the
+   [Atlas failover prerequisites](https://www.mongodb.com/docs/atlas/tutorial/test-resilience/test-primary-failover/):
+
+   ```powershell
+   atlas auth login
+   atlas clusters failover '<atlas-cluster-name>' --projectId '<atlas-project-id>'
+   ```
+
+   Confirm a different primary in Atlas, wait for `/health/ready` to return 200, then
+   repeat the authenticated create/read and SQL count check. During election a request
+   may fail; do not blindly retry an ambiguous POST because it has no idempotency key.
+   In staging, temporarily block the app's SQL access, create a cover, verify its pending
+   `auditOutbox` document, restore access and confirm exactly one SQL audit row. Repeat
+   with two replicas and restart one    during delivery. Clear tokens and secrets from the shell after the checks:
+
+   ```powershell
+   Remove-Variable sql,mongo,migrationSql,readToken,writeToken,readHeaders,writeHeaders
+   Remove-Item Env:\ASPNETCORE_ENVIRONMENT,Env:\Database__MongoDatabaseName,Env:\Authentication__Authority,Env:\Authentication__Audience
+   ```
+
+---
+
+## Design and business rules
+
+The project is split into API, application, domain and infrastructure folders. Controllers
+map HTTP to command and query handlers (CQRS, below); handlers use FluentValidation validators,
+a premium calculator and repository/auditing interfaces. MongoDB mappings stay in infrastructure. Commands prevent
+clients from setting IDs and premiums. Swagger uses XML documentation.
+
+Requests are validated with [FluentValidation](https://docs.fluentvalidation.net):
+`CreateClaimCommandValidator` and `CreateCoverCommandValidator` are registered by
+`AddApplication()`, and the command handlers call `ValidateAndThrow(Async)` before doing any work. A
+`ValidationException` is mapped to `400 application/problem+json` with all errors, grouped by
+field. The claim validator is async because it loads the cover (once) to check the cover rules;
+the cover validator gets "today" from the injected `TimeProvider`.
+
+### CQRS
+
+Every operation is a separate use case with its own handler (`Application/Claims`, `Application/Covers`):
+
+| Commands (change state) | Queries (read only) |
+|---|---|
+| `CreateClaimCommand`, `DeleteClaimCommand` | `GetClaimsQuery`, `GetClaimByIdQuery` |
+| `CreateCoverCommand`, `DeleteCoverCommand` | `GetCoversQuery`, `GetCoverByIdQuery`, `ComputePremiumQuery` |
+
+Handlers implement `ICommandHandler<,>` or `IQueryHandler<,>` and are injected into controller
+actions. Trade-offs: both sides share one store and repository (no separate read model), and
+there is no mediator library; handlers are registered explicitly and called directly, which keeps
+the flow easy to follow. A read model or mediator pipeline can be added later without touching controllers' contracts.
+| Entity | Rule | Implementation |
+|---|---|---|
+| Claim | DamageCost ≤ 100 000 | Also rejects negative values. |
+| Claim | Created within the cover period | `StartDate.Date ≤ Created.Date ≤ EndDate.Date`; an unknown `CoverId` is a 400 too. |
+| Claim | Name and CoverId required, valid Type | Added rules: empty values and undefined enum numbers are rejected. |
+| Cover | StartDate not in the past | Compared by date against "today" from the injected `TimeProvider` (UTC). |
+| Cover | Period ≤ 1 year | `EndDate ≤ StartDate.AddYears(1)`; additionally `EndDate > StartDate`. |
+| Cover | Valid Type | Added rule: undefined enum numbers are rejected. |
+
+The `/Covers/compute` endpoint runs the same cover validation, so it cannot quote a premium for a
+cover that could never be created.
+
+`PremiumCalculator` replaces overlapping tier checks that charged days more than once,
+made days after 365 free, and rounded fractional days up. It retains the original
+surcharges and applies these discounts:
+
+```
+day rate = 1250 × surcharge      (Yacht 1.10, Passenger ship 1.20, Tanker 1.50, other 1.30)
+
+days   1–30   : day rate × 1.00
+days  31–180  : day rate × 0.95 (Yacht)  | 0.98 (other)
+days 181+     : day rate × 0.92 (Yacht)  | 0.97 (other)
+```
+
+The additional discount is interpreted cumulatively. Premium dates are end-exclusive,
+while claim dates include both cover endpoints. Today is UTC, a year is a calendar year,
+and deleting a missing item is still audited.
+
+Decisions on the points that the assignment leaves open:
+
+- **Claim date:** still supplied by the client, but it cannot be in the future (UTC) and must lie
+  within the cover period. A claim can therefore only be filed on a cover that has already started.
+- **Cover types:** every type has an explicit surcharge; a type without one throws instead of
+  silently getting the "other" price.
+- **Money:** amounts are `decimal`, rounded to 2 decimals (away from zero); no currency is modelled.
+- **Premium:** calculated once when the cover is created and stored; later rate changes do not
+  re-price existing covers.
+- **Claim vs. cover delete race:** MongoDB cannot enforce a foreign key, so both sides check. Deleting a cover
+  is refused while claims exist (409), and creating a claim re-checks the cover in the database *after*
+  the insert and withdraws (deletes and audits) the claim if the cover vanished in between. Whichever
+  order the two requests interleave, no claim stays without a cover. The only visible effect is a
+  briefly existing claim and an extra audit pair, and the caller gets a 400 "cover does not exist".
+
+**Review first:** confirm the discount and date assumptions with the business; review the
+outbox transaction and SQL receipt handling under failures. The `AddAuditReceipts` SQL
+migration adds the deduplication table; earlier audit entity nullability was corrected to
+match the original schema.
+
+Unit tests cover pricing, validation, handlers, configuration, outbox staging and
+authorization. Integration tests exercise the HTTP API, audit delivery, transaction
+rollback and concurrent relay attempts with MongoDB and SQL Server containers.
+
+### Handling load
+
+- **Paging:** `GET /Claims` and `GET /Covers` accept `skip` (default 0) and `take` (default 50, maximum 100) and return items ordered by id. Out-of-range values return `400`. Offset paging is simple but gets slower for very large `skip` values; switch to a cursor on the id if that matters.
+- **Cover cache (Redis):** claim creation reads its cover every time, so found covers are cached in Redis (`IDistributedCache`, key `claims:<id>`, 5-minute expiry) written to the cache when a cover is created (so it is warm for the first claim) and evicted when it is deleted. Cover changes only go through these two operations, so the cache is rebuilt on every change. All instances share the cache, so a delete is visible everywhere. Covers are never updated. The cache is optional: without `Redis__ConnectionString` an in-memory cache is used, and if Redis is down or slow (500 ms timeout) the error is logged as a warning and the database is used. A missed eviction can leave a deleted cover usable for up to 5 minutes. Missing covers are not cached.
+- **Rate limiting:** the `api` policy (fixed window per caller: Entra `oid`/`sub`, else client IP) is applied with `[EnableRateLimiting]` to `ClaimsController` and `CoversController` and returns `429` beyond 30 requests per second. Health checks are not limited. The limit is per instance, so the effective total grows with the instance count; use Azure API Management or Front Door for a global limit. Behind a proxy the IP is the proxy's unless forwarded headers are configured and trusted.
+- **Indexes:** lookups by id use MongoDB's built-in `_id` index, and paging sorts on it. No endpoint queries claims by `CoverId`, so no extra index is added (it would only slow writes); add one when such a query exists.
+## Security hardening
+
+### Ids and personal data
+- **Ids are native `Guid`s** (stored as standard BSON UUIDs in MongoDB). Routes use `{id:guid}`, so a malformed id does not match any route (404) and ids cannot be guessed from a sequence. SQL audit rows keep the id as text.
+- **Existing string-id documents are not migrated**, so they are unreadable after this change. Acceptable for this assignment; a real system would need a one-off migration.
+- **`Claim.Name` is encrypted at rest** with AES-256-GCM (`FieldEncryption.cs`). Every value has a random nonce and an authentication tag, so equal names look different and tampering is detected. The stored form `v1:<base64>` leaves room for key rotation.
+- The model has **no email or phone fields**; the name is the only personal free text. Any new personal field should use the same value converter in `ClaimsDbContext`.
+- **Key:** `Encryption:Key` is a base64 32-byte key. It is required outside Development (startup fails otherwise) and belongs in Azure Key Vault. In Development a throw-away key is generated, which matches the throw-away local databases.
+- **Trade-off:** encryption is non-deterministic, so names cannot be searched or sorted in the database. Nothing needs that today. Losing the key means losing the names.
+
+### HTTPS and certificates
+- **Development:** `dotnet run` listens on `https://localhost:7052` with the ASP.NET Core development certificate (trust it once with `dotnet dev-certs https --trust`) and redirects HTTP to HTTPS.
+- **Azure (recommended):** TLS is terminated by the ingress (Container Apps / Front Door / App Gateway) with a managed or Key Vault certificate. The container speaks HTTP on 8080 and no redirect is configured, which avoids redirect loops.
+- **Docker / VM without an ingress:** Kestrel serves HTTPS on 8443 from a mounted PFX and redirects HTTP 8080 to it. Create a local test certificate and start:
+  ```powershell
+  dotnet dev-certs https -ep certs\claims.pfx -p "<password>"
+  $env:Https__CertPassword = "<password>"; docker compose up --build
+  ```
+  `certs/` is git-ignored. In production use a CA-issued certificate from Key Vault, never the development certificate, and renew before expiry.
+- HSTS is sent outside Development, so browsers refuse plain HTTP after the first secure visit.
+### Review findings
+Fixed: request bodies are limited to 64 KB, the `Server` header is removed, `X-Content-Type-Options: nosniff` and HSTS (outside Development) are sent, and names are limited to 200 characters. Already in place: authentication cannot be disabled outside Development/Test, Swagger is Development-only, no CORS, logs and error responses carry no exception messages or personal data, and the SQL audit stores ids only.
+
+Still to do by whoever deploys it:
+- Redis in `docker-compose.yml` has no password or TLS (internal network only). Use Azure Cache for Redis with TLS and access keys.
+- The rate limit is keyed on the caller IP; behind a proxy or API Management configure forwarded headers, or every caller shares one bucket.
+- Set `AllowedHosts` to the real host names.
+- Use managed identity or Key Vault references instead of connection strings in app settings, and rely on TLS and encryption at rest from MongoDB Atlas / Azure SQL.
+- There is no per-tenant data isolation: every authorized caller sees every claim.
+## Logging and tracing
+
+The application writes JSON to stdout. Every log has a `TraceId`: request logs use the
+W3C trace ID returned in ProblemDetails, while startup and background logs use a
+process-level correlation ID when no request activity exists. Audit staging logs include
+the generated `AuditId`, which links the request to later relay failures. `Information`
+covers startup, migrations, mutations and relay batches; `Warning` covers validation
+and authorization failures; `Error` covers unexpected failures and relay retries.
+Individual audit delivery and duplicate-skip events are `Debug` (off by default).
+
+Logs omit request bodies, tokens, connection strings and exception messages. To avoid
+exposing framework-supplied data, framework events retain only category, event ID and
+exception type; application failures record the exception type rather than its message.
+The JSON formatter retains trace, span and request scopes, not arbitrary scope values.
+
+For Container Apps logs sent to Log Analytics, find a request or audit event with:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| extend event = parse_json(Log_s)
+| where tostring(event.TraceId) == "<trace-id>" or tostring(event.State.AuditId) == "<audit-id>"
+| project TimeGenerated, Level = event.LogLevel, Category = event.Category, Message = event.Message, State = event.State
+| order by TimeGenerated asc
+```
+
+The workspace must be configured to collect console logs; Application Insights is not
+configured by this project.

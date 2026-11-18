@@ -299,3 +299,4 @@ __pycache__/
 
 # kdiff3 temp files
 *.orig
+certs/
