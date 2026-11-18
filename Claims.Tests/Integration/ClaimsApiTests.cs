@@ -29,7 +29,8 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private static readonly DateTime Tomorrow = DateTime.UtcNow.Date.AddDays(1);
+    private static readonly DateTime Today = DateTime.UtcNow.Date;
+    private static readonly DateTime Tomorrow = Today.AddDays(1);
 
     private readonly HttpClient _client = factory.CreateClient();
 
@@ -54,8 +55,8 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     [Fact]
     public async Task A_claim_can_be_created_read_and_deleted()
     {
-        var cover = await CreateCoverAsync();
-        var request = new CreateClaimCommand(cover.Id, Tomorrow.AddDays(5), "Grounded in port", ClaimType.Grounding, 25_000);
+        var cover = await SeedStartedCoverAsync();
+        var request = new CreateClaimCommand(cover.Id, Today, "Grounded in port", ClaimType.Grounding, 25_000);
 
         var createResponse = await _client.PostAsJsonAsync("/Claims", request, Json, Token);
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
@@ -72,8 +73,8 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     [Fact]
     public async Task Claim_names_are_encrypted_in_the_database_and_ids_are_native_uuids()
     {
-        var cover = await CreateCoverAsync();
-        var request = new CreateClaimCommand(cover.Id, Tomorrow.AddDays(5), "Jane Doe", ClaimType.Fire, 100);
+        var cover = await SeedStartedCoverAsync();
+        var request = new CreateClaimCommand(cover.Id, Today, "Jane Doe", ClaimType.Fire, 100);
         var response = await _client.PostAsJsonAsync("/Claims", request, Json, Token);
         var created = (await response.Content.ReadFromJsonAsync<Claim>(Json, Token))!;
 
@@ -91,9 +92,9 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     [Fact]
     public async Task A_cover_with_claims_cannot_be_deleted_until_they_are_gone()
     {
-        var cover = await CreateCoverAsync();
+        var cover = await SeedStartedCoverAsync();
         var claimResponse = await _client.PostAsJsonAsync("/Claims",
-            new CreateClaimCommand(cover.Id, Tomorrow.AddDays(5), "Jane Doe", ClaimType.Fire, 100), Json, Token);
+            new CreateClaimCommand(cover.Id, Today, "Jane Doe", ClaimType.Fire, 100), Json, Token);
         var claim = (await claimResponse.Content.ReadFromJsonAsync<Claim>(Json, Token))!;
 
         Assert.Equal(HttpStatusCode.Conflict, (await _client.DeleteAsync($"/Covers/{cover.Id}", Token)).StatusCode);
@@ -105,8 +106,8 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     [Fact]
     public async Task An_invalid_claim_returns_400_with_every_broken_rule()
     {
-        var cover = await CreateCoverAsync();
-        var request = new CreateClaimCommand(cover.Id, Tomorrow.AddYears(2), "Too late and too expensive", ClaimType.Fire, 100_001);
+        var cover = await SeedStartedCoverAsync();
+        var request = new CreateClaimCommand(cover.Id, Today.AddYears(2), "Too late and too expensive", ClaimType.Fire, 100_001);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/Claims")
         {
@@ -245,6 +246,17 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
             if (logLevel == LogLevel.Error)
                 Error.TrySetResult(formatter(state, exception));
         }
+    }
+
+    // The API refuses covers that start in the past, but claims can only be filed on covers that already started.
+    private async Task<Cover> SeedStartedCoverAsync()
+    {
+        var cover = new Cover { Id = Guid.NewGuid(), StartDate = Today.AddDays(-10), EndDate = Today.AddDays(80), Type = CoverType.PassengerShip, Premium = 1m };
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<ClaimsDbContext>();
+        db.Add(cover);
+        await db.SaveChangesAsync(Token);
+        return cover;
     }
 
     private async Task<Cover> CreateCoverAsync()

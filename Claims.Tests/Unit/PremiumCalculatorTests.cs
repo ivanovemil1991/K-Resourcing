@@ -44,6 +44,12 @@ public class PremiumCalculatorTests
     }
 
     [Fact]
+    public void A_cover_type_without_a_price_is_rejected_instead_of_silently_priced()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => PremiumCalculator.Calculate(Start, Start.AddDays(1), (CoverType)99));
+    }
+
+    [Fact]
     public void An_empty_or_reversed_period_costs_nothing()
     {
         Assert.Equal(0, PremiumCalculator.Calculate(Start, Start, CoverType.Tanker));

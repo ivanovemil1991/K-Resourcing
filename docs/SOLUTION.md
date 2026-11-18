@@ -304,7 +304,22 @@ days 181+     : day rate × 0.92 (Yacht)  | 0.97 (other)
 
 The additional discount is interpreted cumulatively. Premium dates are end-exclusive,
 while claim dates include both cover endpoints. Today is UTC, a year is a calendar year,
-and deleting a missing item is still audited. Premium rounding is not specified.
+and deleting a missing item is still audited.
+
+Decisions on the points that the assignment leaves open:
+
+- **Claim date:** still supplied by the client, but it cannot be in the future (UTC) and must lie
+  within the cover period. A claim can therefore only be filed on a cover that has already started.
+- **Cover types:** every type has an explicit surcharge; a type without one throws instead of
+  silently getting the "other" price.
+- **Money:** amounts are `decimal`, rounded to 2 decimals (away from zero); no currency is modelled.
+- **Premium:** calculated once when the cover is created and stored; later rate changes do not
+  re-price existing covers.
+- **Claim vs. cover delete race:** MongoDB cannot enforce a foreign key, so both sides check. Deleting a cover
+  is refused while claims exist (409), and creating a claim re-checks the cover in the database *after*
+  the insert and withdraws (deletes and audits) the claim if the cover vanished in between. Whichever
+  order the two requests interleave, no claim stays without a cover. The only visible effect is a
+  briefly existing claim and an extra audit pair, and the caller gets a 400 "cover does not exist".
 
 **Review first:** confirm the discount and date assumptions with the business; review the
 outbox transaction and SQL receipt handling under failures. The `AddAuditReceipts` SQL

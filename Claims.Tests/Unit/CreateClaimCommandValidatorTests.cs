@@ -16,7 +16,11 @@ public class CreateClaimCommandValidatorTests
         Premium = 1
     };
 
-    private readonly CreateClaimCommandValidator _validator = new(new InMemoryRepository<Cover>(January));
+    // The clock is after the cover ended, so only the cover period (not the future-date rule) limits the dates.
+    private static CreateClaimCommandValidator ValidatorAt(DateTimeOffset now) =>
+        new(new InMemoryRepository<Cover>(January), new FixedTimeProvider(now));
+
+    private readonly CreateClaimCommandValidator _validator = ValidatorAt(new DateTimeOffset(2030, 2, 15, 0, 0, 0, TimeSpan.Zero));
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -45,6 +49,17 @@ public class CreateClaimCommandValidatorTests
         var fields = await InvalidFields(Claim(January.StartDate, damageCost));
 
         Assert.Equal(nameof(CreateClaimCommand.DamageCost), Assert.Single(fields));
+    }
+
+    [Fact]
+    public async Task Created_after_today_is_invalid_even_inside_the_cover_period()
+    {
+        var validator = ValidatorAt(new DateTimeOffset(2030, 1, 15, 8, 0, 0, TimeSpan.Zero));
+
+        Assert.True((await validator.ValidateAsync(Claim(new DateTime(2030, 1, 15, 23, 0, 0)), Token)).IsValid);
+        var result = await validator.ValidateAsync(Claim(new DateTime(2030, 1, 16)), Token);
+
+        Assert.Equal(nameof(CreateClaimCommand.Created), Assert.Single(result.Errors).PropertyName);
     }
 
     [Theory]

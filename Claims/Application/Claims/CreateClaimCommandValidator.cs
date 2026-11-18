@@ -4,7 +4,7 @@ using FluentValidation;
 
 namespace Claims.Application.Claims;
 
-/// <summary>Validates a <see cref="CreateClaimCommand"/>, including its relation to the cover.</summary>
+/// <summary>Validates a <see cref="CreateClaimCommand"/>, including its relation to the cover. "Today" comes from the injected clock.</summary>
 public sealed class CreateClaimCommandValidator : AbstractValidator<CreateClaimCommand>
 {
     /// <summary>The highest damage cost a single claim may have.</summary>
@@ -13,11 +13,16 @@ public sealed class CreateClaimCommandValidator : AbstractValidator<CreateClaimC
     /// <summary>The longest claim name accepted, so that a request cannot store unbounded text.</summary>
     public const int MaxNameLength = 200;
 
-    public CreateClaimCommandValidator(IRepository<Cover> covers)
+    public CreateClaimCommandValidator(IRepository<Cover> covers, TimeProvider timeProvider)
     {
         RuleFor(claim => claim.Name).NotEmpty().MaximumLength(MaxNameLength);
         RuleFor(claim => claim.Type).IsInEnum();
         RuleFor(claim => claim.CoverId).NotEmpty();
+
+        // A claim reports damage that already happened, so it cannot be dated in the future.
+        RuleFor(claim => claim.Created)
+            .Must(created => DateOnly.FromDateTime(created) <= DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime))
+            .WithMessage("Created date cannot be in the future.");
 
         RuleFor(claim => claim.DamageCost)
             .GreaterThanOrEqualTo(0).WithMessage("DamageCost cannot be negative.")

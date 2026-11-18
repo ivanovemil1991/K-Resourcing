@@ -19,6 +19,9 @@ public class ClaimHandlerTests
         Premium = 1
     };
 
+    private static readonly DateTimeOffset Now = new(2030, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private readonly InMemoryRepository<Cover> _covers = new(ExistingCover);
     private readonly InMemoryRepository<Claim> _claims = new();
     private readonly RecordingAuditer _auditer = new();
     private readonly CreateClaimCommandHandler _create;
@@ -27,7 +30,7 @@ public class ClaimHandlerTests
 
     public ClaimHandlerTests()
     {
-        _create = new CreateClaimCommandHandler(_claims, new CreateClaimCommandValidator(new InMemoryRepository<Cover>(ExistingCover)), _auditer, NullLogger<CreateClaimCommandHandler>.Instance);
+        _create = new CreateClaimCommandHandler(_claims, new CreateClaimCommandValidator(_covers, new FixedTimeProvider(Now)), new FakeClaimReferences(_claims, _covers), _auditer, NullLogger<CreateClaimCommandHandler>.Instance);
         _delete = new DeleteClaimCommandHandler(_claims, _auditer, NullLogger<DeleteClaimCommandHandler>.Instance);
         _getById = new GetClaimByIdQueryHandler(_claims, NullLogger<GetClaimByIdQueryHandler>.Instance);
     }
@@ -68,6 +71,31 @@ public class ClaimHandlerTests
         var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
 
         Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(exception.Errors).PropertyName);
+    }
+
+    [Fact]
+    public async Task Create_withdraws_the_claim_when_its_cover_is_deleted_meanwhile()
+    {
+        // The validator still sees the cover, but the database check after the insert no longer finds it.
+        var coversAfterDeletion = new InMemoryRepository<Cover>();
+        var create = new CreateClaimCommandHandler(_claims, new CreateClaimCommandValidator(_covers, new FixedTimeProvider(Now)),
+            new FakeClaimReferences(_claims, coversAfterDeletion), _auditer, NullLogger<CreateClaimCommandHandler>.Instance);
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => create.HandleAsync(ValidRequest(), Token));
+
+        Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(exception.Errors).PropertyName);
+        Assert.Empty(_claims.Stored);
+        Assert.Equal([AuditAction.Created, AuditAction.Deleted], _auditer.Entries.Select(entry => entry.Action));
+    }
+
+    [Fact]
+    public async Task Create_rejects_a_claim_dated_in_the_future()
+    {
+        var request = ValidRequest() with { Created = Now.UtcDateTime.AddDays(1) };
+
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
+
+        Assert.Equal(nameof(CreateClaimCommand.Created), exception.Errors.First().PropertyName);
     }
 
     [Fact]

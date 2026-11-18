@@ -11,6 +11,9 @@ namespace Claims.Application.Covers;
 ///   <item><term>31 – 180</term><description>5% / 2%</description></item>
 ///   <item><term>181 and later</term><description>8% / 3%</description></item>
 /// </list>
+/// Discounts are cumulative per tier (yacht: 5% then 5% + 3% = 8%) and apply only to the days inside that tier.
+/// The period is <c>endDate − startDate</c> days, so the end date itself is not charged.
+/// Amounts are unit-less (no currency is modelled) and rounded to 2 decimals, away from zero.
 /// </remarks>
 public static class PremiumCalculator
 {
@@ -39,6 +42,7 @@ public static class PremiumCalculator
     /// <param name="endDate">End of the period. The number of days is <c>endDate − startDate</c>; time of day is ignored.</param>
     /// <param name="coverType">The kind of vessel to insure.</param>
     /// <returns>The total premium, or 0 if the period is empty.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="coverType"/> has no price. Add it to <see cref="SurchargeMultiplier"/>.</exception>
     public static decimal Calculate(DateTime startDate, DateTime endDate, CoverType coverType)
     {
         var dayRate = BaseDayRate * SurchargeMultiplier(coverType);
@@ -52,7 +56,7 @@ public static class PremiumCalculator
             daysLeft -= daysInTier;
         }
 
-        return premium;
+        return Math.Round(premium, 2, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>Returns the vessel type's multiplier for the base day rate.</summary>
@@ -61,6 +65,7 @@ public static class PremiumCalculator
         CoverType.Yacht => 1.1m,
         CoverType.PassengerShip => 1.2m,
         CoverType.Tanker => 1.5m,
-        _ => 1.3m
+        CoverType.ContainerShip or CoverType.BulkCarrier => 1.3m,
+        _ => throw new ArgumentOutOfRangeException(nameof(coverType), coverType, "No premium is defined for this cover type.")
     };
 }
