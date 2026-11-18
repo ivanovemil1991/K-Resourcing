@@ -1,3 +1,4 @@
+using Claims.Application.Abstractions;
 using Claims.Application.Covers;
 using Claims.Domain;
 using Microsoft.AspNetCore.Authorization;
@@ -10,7 +11,7 @@ namespace Claims.Api.Controllers;
 [Route("[controller]")]
 [Produces("application/json")]
 [Authorize(Policy = AuthorizationPolicies.Read)]
-public class CoversController(ICoverService coverService) : ControllerBase
+public class CoversController : ControllerBase
 {
     /// <summary>Quotes a premium without creating a cover.</summary>
     /// <remarks>Uses the same validation as cover creation.</remarks>
@@ -19,13 +20,20 @@ public class CoversController(ICoverService coverService) : ControllerBase
     [HttpPost("compute")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public ActionResult<decimal> ComputePremium(DateTime startDate, DateTime endDate, CoverType coverType) =>
-        coverService.ComputePremium(new CreateCoverRequest(startDate, endDate, coverType));
+    public async Task<ActionResult<decimal>> ComputePremium(
+        DateTime startDate,
+        DateTime endDate,
+        CoverType coverType,
+        [FromServices] IQueryHandler<ComputePremiumQuery, decimal> handler,
+        CancellationToken cancellationToken) =>
+        await handler.HandleAsync(new ComputePremiumQuery(startDate, endDate, coverType), cancellationToken);
 
     /// <summary>Returns all covers.</summary>
     [HttpGet]
-    public Task<IReadOnlyList<Cover>> GetAll(CancellationToken cancellationToken) =>
-        coverService.GetAllAsync(cancellationToken);
+    public Task<IReadOnlyList<Cover>> GetAll(
+        [FromServices] IQueryHandler<GetCoversQuery, IReadOnlyList<Cover>> handler,
+        CancellationToken cancellationToken) =>
+        handler.HandleAsync(new GetCoversQuery(), cancellationToken);
 
     /// <summary>Returns a single cover.</summary>
     /// <response code="200">The cover.</response>
@@ -33,9 +41,12 @@ public class CoversController(ICoverService coverService) : ControllerBase
     [HttpGet("{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<Cover>> GetById(string id, CancellationToken cancellationToken)
+    public async Task<ActionResult<Cover>> GetById(
+        string id,
+        [FromServices] IQueryHandler<GetCoverByIdQuery, Cover?> handler,
+        CancellationToken cancellationToken)
     {
-        var cover = await coverService.GetByIdAsync(id, cancellationToken);
+        var cover = await handler.HandleAsync(new GetCoverByIdQuery(id), cancellationToken);
         return cover is null ? NotFound() : cover;
     }
 
@@ -46,9 +57,12 @@ public class CoversController(ICoverService coverService) : ControllerBase
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<Cover>> Create(CreateCoverRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<Cover>> Create(
+        CreateCoverCommand command,
+        [FromServices] ICommandHandler<CreateCoverCommand, Cover> handler,
+        CancellationToken cancellationToken)
     {
-        var cover = await coverService.CreateAsync(request, cancellationToken);
+        var cover = await handler.HandleAsync(command, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = cover.Id }, cover);
     }
 
@@ -59,6 +73,9 @@ public class CoversController(ICoverService coverService) : ControllerBase
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Delete(string id, CancellationToken cancellationToken) =>
-        await coverService.DeleteAsync(id, cancellationToken) ? NoContent() : NotFound();
+    public async Task<IActionResult> Delete(
+        string id,
+        [FromServices] ICommandHandler<DeleteCoverCommand, bool> handler,
+        CancellationToken cancellationToken) =>
+        await handler.HandleAsync(new DeleteCoverCommand(id), cancellationToken) ? NoContent() : NotFound();
 }

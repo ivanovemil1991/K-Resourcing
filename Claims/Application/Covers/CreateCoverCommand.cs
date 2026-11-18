@@ -6,4 +6,4 @@ namespace Claims.Application.Covers;
 /// <param name="StartDate">First day of the insurance period. Cannot be in the past.</param>
 /// <param name="EndDate">End of the insurance period. At most one year after <paramref name="StartDate"/>.</param>
 /// <param name="Type">The kind of vessel to insure.</param>
-public sealed record CreateCoverRequest(DateTime StartDate, DateTime EndDate, CoverType Type);
+public sealed record CreateCoverCommand(DateTime StartDate, DateTime EndDate, CoverType Type);

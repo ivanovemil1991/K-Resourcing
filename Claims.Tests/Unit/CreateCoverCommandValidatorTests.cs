@@ -5,16 +5,16 @@ using Xunit;
 
 namespace Claims.Tests.Unit;
 
-public class CreateCoverRequestValidatorTests
+public class CreateCoverCommandValidatorTests
 {
     private static readonly DateTime TodayAtMidnight = new(2030, 6, 15);
 
-    private readonly CreateCoverRequestValidator _validator =
+    private readonly CreateCoverCommandValidator _validator =
         new(new FixedTimeProvider(new DateTimeOffset(TodayAtMidnight, TimeSpan.Zero)));
 
-    private static CreateCoverRequest Cover(DateTime start, DateTime end) => new(start, end, CoverType.Yacht);
+    private static CreateCoverCommand Cover(DateTime start, DateTime end) => new(start, end, CoverType.Yacht);
 
-    private string[] InvalidFields(CreateCoverRequest request) =>
+    private string[] InvalidFields(CreateCoverCommand request) =>
         _validator.Validate(request).Errors.Select(error => error.PropertyName).ToArray();
 
     [Fact]
@@ -34,7 +34,7 @@ public class CreateCoverRequestValidatorTests
     {
         var fields = InvalidFields(Cover(TodayAtMidnight.AddDays(-1), TodayAtMidnight.AddDays(10)));
 
-        Assert.Equal(nameof(CreateCoverRequest.StartDate), Assert.Single(fields));
+        Assert.Equal(nameof(CreateCoverCommand.StartDate), Assert.Single(fields));
     }
 
     [Fact]
@@ -42,7 +42,7 @@ public class CreateCoverRequestValidatorTests
     {
         var fields = InvalidFields(Cover(TodayAtMidnight, TodayAtMidnight.AddYears(1).AddDays(1)));
 
-        Assert.Equal(nameof(CreateCoverRequest.EndDate), Assert.Single(fields));
+        Assert.Equal(nameof(CreateCoverCommand.EndDate), Assert.Single(fields));
     }
 
     [Theory]
@@ -52,7 +52,7 @@ public class CreateCoverRequestValidatorTests
     {
         var fields = InvalidFields(Cover(TodayAtMidnight, TodayAtMidnight.AddDays(lengthInDays)));
 
-        Assert.Equal(nameof(CreateCoverRequest.EndDate), Assert.Single(fields));
+        Assert.Equal(nameof(CreateCoverCommand.EndDate), Assert.Single(fields));
     }
 
     [Fact]
@@ -68,6 +68,6 @@ public class CreateCoverRequestValidatorTests
     {
         var fields = InvalidFields(Cover(TodayAtMidnight, TodayAtMidnight.AddDays(10)) with { Type = (CoverType)99 });
 
-        Assert.Equal(nameof(CreateCoverRequest.Type), Assert.Single(fields));
+        Assert.Equal(nameof(CreateCoverCommand.Type), Assert.Single(fields));
     }
 }

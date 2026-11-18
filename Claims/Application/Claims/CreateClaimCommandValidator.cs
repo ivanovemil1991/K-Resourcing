@@ -4,13 +4,13 @@ using FluentValidation;
 
 namespace Claims.Application.Claims;
 
-/// <summary>Validates a <see cref="CreateClaimRequest"/>, including its relation to the cover.</summary>
-public sealed class CreateClaimRequestValidator : AbstractValidator<CreateClaimRequest>
+/// <summary>Validates a <see cref="CreateClaimCommand"/>, including its relation to the cover.</summary>
+public sealed class CreateClaimCommandValidator : AbstractValidator<CreateClaimCommand>
 {
     /// <summary>The highest damage cost a single claim may have.</summary>
     public const decimal MaxDamageCost = 100_000m;
 
-    public CreateClaimRequestValidator(IRepository<Cover> covers)
+    public CreateClaimCommandValidator(IRepository<Cover> covers)
     {
         RuleFor(claim => claim.Name).NotEmpty();
         RuleFor(claim => claim.Type).IsInEnum();

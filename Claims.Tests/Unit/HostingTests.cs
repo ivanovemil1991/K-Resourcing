@@ -1,3 +1,4 @@
+using Claims.Application.Abstractions;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -73,7 +74,7 @@ public class HostingTests
                     ["Database:ClaimsMongoDb"] = "mongodb://127.0.0.1:1",
                     ["Authentication:Enabled"] = "false"
                 }));
-            builder.ConfigureTestServices(services => services.AddScoped<ICoverService, FailingCoverService>());
+            builder.ConfigureTestServices(services => services.AddScoped<IQueryHandler<GetCoverByIdQuery, Cover?>, FailingGetCoverById>());
         });
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/Covers/test");
@@ -93,12 +94,9 @@ public class HostingTests
         Assert.Equal("12345678901234567890123456789012", invalidProblem.GetProperty("traceId").GetString());
     }
 
-    private sealed class FailingCoverService : ICoverService
+    private sealed class FailingGetCoverById : IQueryHandler<GetCoverByIdQuery, Cover?>
     {
-        public Task<IReadOnlyList<Cover>> GetAllAsync(CancellationToken cancellationToken) => throw new NotImplementedException();
-        public Task<Cover?> GetByIdAsync(string id, CancellationToken cancellationToken) => throw new InvalidOperationException("private data");
-        public decimal ComputePremium(CreateCoverRequest request) => throw new NotImplementedException();
-        public Task<Cover> CreateAsync(CreateCoverRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
-        public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<Cover?> HandleAsync(GetCoverByIdQuery query, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("private data");
     }
 }

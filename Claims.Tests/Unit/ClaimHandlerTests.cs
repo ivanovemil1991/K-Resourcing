@@ -8,7 +8,7 @@ using Xunit;
 
 namespace Claims.Tests.Unit;
 
-public class ClaimServiceTests
+public class ClaimHandlerTests
 {
     private static readonly Cover ExistingCover = new()
     {
@@ -21,20 +21,26 @@ public class ClaimServiceTests
 
     private readonly InMemoryRepository<Claim> _claims = new();
     private readonly RecordingAuditer _auditer = new();
-    private readonly ClaimService _service;
+    private readonly CreateClaimCommandHandler _create;
+    private readonly DeleteClaimCommandHandler _delete;
+    private readonly GetClaimByIdQueryHandler _getById;
 
-    public ClaimServiceTests() =>
-        _service = new ClaimService(_claims, new CreateClaimRequestValidator(new InMemoryRepository<Cover>(ExistingCover)), _auditer, NullLogger<ClaimService>.Instance);
+    public ClaimHandlerTests()
+    {
+        _create = new CreateClaimCommandHandler(_claims, new CreateClaimCommandValidator(new InMemoryRepository<Cover>(ExistingCover)), _auditer, NullLogger<CreateClaimCommandHandler>.Instance);
+        _delete = new DeleteClaimCommandHandler(_claims, _auditer, NullLogger<DeleteClaimCommandHandler>.Instance);
+        _getById = new GetClaimByIdQueryHandler(_claims, NullLogger<GetClaimByIdQueryHandler>.Instance);
+    }
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static CreateClaimRequest ValidRequest() =>
+    private static CreateClaimCommand ValidRequest() =>
         new(ExistingCover.Id, new DateTime(2030, 3, 1), "Engine fire", ClaimType.Fire, 50_000);
 
     [Fact]
     public async Task Create_stores_the_claim_with_a_new_id_and_audits_it()
     {
-        var claim = await _service.CreateAsync(ValidRequest(), Token);
+        var claim = await _create.HandleAsync(ValidRequest(), Token);
 
         Assert.False(string.IsNullOrWhiteSpace(claim.Id));
         Assert.Equal("Engine fire", claim.Name);
@@ -47,9 +53,9 @@ public class ClaimServiceTests
     {
         var request = ValidRequest() with { DamageCost = 150_000 };
 
-        var exception = await Assert.ThrowsAsync<ValidationException>(() => _service.CreateAsync(request, Token));
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
 
-        Assert.Equal(nameof(CreateClaimRequest.DamageCost), Assert.Single(exception.Errors).PropertyName);
+        Assert.Equal(nameof(CreateClaimCommand.DamageCost), Assert.Single(exception.Errors).PropertyName);
         Assert.Empty(_claims.Stored);
         Assert.Empty(_auditer.Entries);
     }
@@ -59,18 +65,18 @@ public class ClaimServiceTests
     {
         var request = ValidRequest() with { CoverId = "does-not-exist" };
 
-        var exception = await Assert.ThrowsAsync<ValidationException>(() => _service.CreateAsync(request, Token));
+        var exception = await Assert.ThrowsAsync<ValidationException>(() => _create.HandleAsync(request, Token));
 
-        Assert.Equal(nameof(CreateClaimRequest.CoverId), Assert.Single(exception.Errors).PropertyName);
+        Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(exception.Errors).PropertyName);
     }
 
     [Fact]
     public async Task Delete_removes_the_claim_and_audits_it()
     {
-        var claim = await _service.CreateAsync(ValidRequest(), Token);
+        var claim = await _create.HandleAsync(ValidRequest(), Token);
         _auditer.Entries.Clear();
 
-        var deleted = await _service.DeleteAsync(claim.Id, Token);
+        var deleted = await _delete.HandleAsync(new DeleteClaimCommand(claim.Id), Token);
 
         Assert.True(deleted);
         Assert.Empty(_claims.Stored);
@@ -80,12 +86,12 @@ public class ClaimServiceTests
     [Fact]
     public async Task Delete_of_an_unknown_claim_returns_false()
     {
-        Assert.False(await _service.DeleteAsync("does-not-exist", Token));
+        Assert.False(await _delete.HandleAsync(new DeleteClaimCommand("does-not-exist"), Token));
     }
 
     [Fact]
     public async Task GetById_returns_null_for_an_unknown_claim()
     {
-        Assert.Null(await _service.GetByIdAsync("does-not-exist", Token));
+        Assert.Null(await _getById.HandleAsync(new GetClaimByIdQuery("does-not-exist"), Token));
     }
 }

@@ -53,7 +53,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     public async Task A_claim_can_be_created_read_and_deleted()
     {
         var cover = await CreateCoverAsync();
-        var request = new CreateClaimRequest(cover.Id, Tomorrow.AddDays(5), "Grounded in port", ClaimType.Grounding, 25_000);
+        var request = new CreateClaimCommand(cover.Id, Tomorrow.AddDays(5), "Grounded in port", ClaimType.Grounding, 25_000);
 
         var createResponse = await _client.PostAsJsonAsync("/Claims", request, Json, Token);
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
@@ -71,7 +71,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
     public async Task An_invalid_claim_returns_400_with_every_broken_rule()
     {
         var cover = await CreateCoverAsync();
-        var request = new CreateClaimRequest(cover.Id, Tomorrow.AddYears(2), "Too late and too expensive", ClaimType.Fire, 100_001);
+        var request = new CreateClaimCommand(cover.Id, Tomorrow.AddYears(2), "Too late and too expensive", ClaimType.Fire, 100_001);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/Claims")
         {
@@ -213,7 +213,7 @@ public class ClaimsApiTests(WebApplicationFactory<Program> factory) : IClassFixt
 
     private async Task<Cover> CreateCoverAsync()
     {
-        var request = new CreateCoverRequest(Tomorrow, Tomorrow.AddDays(90), CoverType.PassengerShip);
+        var request = new CreateCoverCommand(Tomorrow, Tomorrow.AddDays(90), CoverType.PassengerShip);
         var response = await _client.PostAsJsonAsync("/Covers", request, Json, Token);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<Cover>(Json, Token))!;

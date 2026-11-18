@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Claims.Tests.Unit;
 
-public class CreateClaimRequestValidatorTests
+public class CreateClaimCommandValidatorTests
 {
     private static readonly Cover January = new()
     {
@@ -16,14 +16,14 @@ public class CreateClaimRequestValidatorTests
         Premium = 1
     };
 
-    private readonly CreateClaimRequestValidator _validator = new(new InMemoryRepository<Cover>(January));
+    private readonly CreateClaimCommandValidator _validator = new(new InMemoryRepository<Cover>(January));
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static CreateClaimRequest Claim(DateTime created, decimal damageCost = 1_000) =>
+    private static CreateClaimCommand Claim(DateTime created, decimal damageCost = 1_000) =>
         new(January.Id, created, "Scraped hull", ClaimType.Collision, damageCost);
 
-    private async Task<string[]> InvalidFields(CreateClaimRequest request)
+    private async Task<string[]> InvalidFields(CreateClaimCommand request)
     {
         var result = await _validator.ValidateAsync(request, Token);
         return result.Errors.Select(error => error.PropertyName).ToArray();
@@ -44,7 +44,7 @@ public class CreateClaimRequestValidatorTests
     {
         var fields = await InvalidFields(Claim(January.StartDate, damageCost));
 
-        Assert.Equal(nameof(CreateClaimRequest.DamageCost), Assert.Single(fields));
+        Assert.Equal(nameof(CreateClaimCommand.DamageCost), Assert.Single(fields));
     }
 
     [Theory]
@@ -63,7 +63,7 @@ public class CreateClaimRequestValidatorTests
     {
         var fields = await InvalidFields(Claim(DateTime.Parse(created)));
 
-        Assert.Equal(nameof(CreateClaimRequest.Created), Assert.Single(fields));
+        Assert.Equal(nameof(CreateClaimCommand.Created), Assert.Single(fields));
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class CreateClaimRequestValidatorTests
     {
         var fields = await InvalidFields(Claim(January.StartDate) with { CoverId = "does-not-exist" });
 
-        Assert.Equal(nameof(CreateClaimRequest.CoverId), Assert.Single(fields));
+        Assert.Equal(nameof(CreateClaimCommand.CoverId), Assert.Single(fields));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class CreateClaimRequestValidatorTests
     {
         var fields = await InvalidFields(Claim(January.StartDate) with { Name = "", CoverId = "" });
 
-        Assert.Equal([nameof(CreateClaimRequest.CoverId), nameof(CreateClaimRequest.Name)], fields.Order());
+        Assert.Equal([nameof(CreateClaimCommand.CoverId), nameof(CreateClaimCommand.Name)], fields.Order());
     }
 
     [Fact]
@@ -87,6 +87,6 @@ public class CreateClaimRequestValidatorTests
     {
         var fields = await InvalidFields(Claim(January.StartDate) with { Type = (ClaimType)99 });
 
-        Assert.Equal(nameof(CreateClaimRequest.Type), Assert.Single(fields));
+        Assert.Equal(nameof(CreateClaimCommand.Type), Assert.Single(fields));
     }
 }

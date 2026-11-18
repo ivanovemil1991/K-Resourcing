@@ -235,17 +235,30 @@ and configure a user-assigned managed identity with ACR pull access. See the
 ## Design and business rules
 
 The project is split into API, application, domain and infrastructure folders. Controllers
-map HTTP to services; services use FluentValidation validators, a premium calculator and
-repository/auditing interfaces. MongoDB mappings stay in infrastructure. Request DTOs prevent
+map HTTP to command and query handlers (CQRS, below); handlers use FluentValidation validators,
+a premium calculator and repository/auditing interfaces. MongoDB mappings stay in infrastructure. Commands prevent
 clients from setting IDs and premiums. Swagger uses XML documentation.
 
 Requests are validated with [FluentValidation](https://docs.fluentvalidation.net):
-`CreateClaimRequestValidator` and `CreateCoverRequestValidator` are registered by
-`AddApplication()`, and the services call `ValidateAndThrow(Async)` before doing any work. A
+`CreateClaimCommandValidator` and `CreateCoverCommandValidator` are registered by
+`AddApplication()`, and the command handlers call `ValidateAndThrow(Async)` before doing any work. A
 `ValidationException` is mapped to `400 application/problem+json` with all errors, grouped by
 field. The claim validator is async because it loads the cover (once) to check the cover rules;
 the cover validator gets "today" from the injected `TimeProvider`.
 
+### CQRS
+
+Every operation is a separate use case with its own handler (`Application/Claims`, `Application/Covers`):
+
+| Commands (change state) | Queries (read only) |
+|---|---|
+| `CreateClaimCommand`, `DeleteClaimCommand` | `GetClaimsQuery`, `GetClaimByIdQuery` |
+| `CreateCoverCommand`, `DeleteCoverCommand` | `GetCoversQuery`, `GetCoverByIdQuery`, `ComputePremiumQuery` |
+
+Handlers implement `ICommandHandler<,>` or `IQueryHandler<,>` and are injected into controller
+actions. Trade-offs: both sides share one store and repository (no separate read model), and
+there is no mediator library; handlers are registered explicitly and called directly, which keeps
+the flow easy to follow. A read model or mediator pipeline can be added later without touching controllers' contracts.
 | Entity | Rule | Implementation |
 |---|---|---|
 | Claim | DamageCost ≤ 100 000 | Also rejects negative values. |
@@ -279,7 +292,7 @@ outbox transaction and SQL receipt handling under failures. The `AddAuditReceipt
 migration adds the deduplication table; earlier audit entity nullability was corrected to
 match the original schema.
 
-Unit tests cover pricing, validation, services, configuration, outbox staging and
+Unit tests cover pricing, validation, handlers, configuration, outbox staging and
 authorization. Integration tests exercise the HTTP API, audit delivery, transaction
 rollback and concurrent relay attempts with MongoDB and SQL Server containers.
 

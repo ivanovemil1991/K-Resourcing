@@ -1,3 +1,4 @@
+using Claims.Application.Abstractions;
 using Claims.Application.Claims;
 using Claims.Domain;
 using Microsoft.AspNetCore.Authorization;
@@ -10,12 +11,14 @@ namespace Claims.Api.Controllers;
 [Route("[controller]")]
 [Produces("application/json")]
 [Authorize(Policy = AuthorizationPolicies.Read)]
-public class ClaimsController(IClaimService claimService) : ControllerBase
+public class ClaimsController : ControllerBase
 {
     /// <summary>Returns all claims.</summary>
     [HttpGet]
-    public Task<IReadOnlyList<Claim>> GetAll(CancellationToken cancellationToken) =>
-        claimService.GetAllAsync(cancellationToken);
+    public Task<IReadOnlyList<Claim>> GetAll(
+        [FromServices] IQueryHandler<GetClaimsQuery, IReadOnlyList<Claim>> handler,
+        CancellationToken cancellationToken) =>
+        handler.HandleAsync(new GetClaimsQuery(), cancellationToken);
 
     /// <summary>Returns a single claim.</summary>
     /// <response code="200">The claim.</response>
@@ -23,9 +26,12 @@ public class ClaimsController(IClaimService claimService) : ControllerBase
     [HttpGet("{id}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<Claim>> GetById(string id, CancellationToken cancellationToken)
+    public async Task<ActionResult<Claim>> GetById(
+        string id,
+        [FromServices] IQueryHandler<GetClaimByIdQuery, Claim?> handler,
+        CancellationToken cancellationToken)
     {
-        var claim = await claimService.GetByIdAsync(id, cancellationToken);
+        var claim = await handler.HandleAsync(new GetClaimByIdQuery(id), cancellationToken);
         return claim is null ? NotFound() : claim;
     }
 
@@ -36,9 +42,12 @@ public class ClaimsController(IClaimService claimService) : ControllerBase
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<Claim>> Create(CreateClaimRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<Claim>> Create(
+        CreateClaimCommand command,
+        [FromServices] ICommandHandler<CreateClaimCommand, Claim> handler,
+        CancellationToken cancellationToken)
     {
-        var claim = await claimService.CreateAsync(request, cancellationToken);
+        var claim = await handler.HandleAsync(command, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = claim.Id }, claim);
     }
 
@@ -49,6 +58,9 @@ public class ClaimsController(IClaimService claimService) : ControllerBase
     [Authorize(Policy = AuthorizationPolicies.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Delete(string id, CancellationToken cancellationToken) =>
-        await claimService.DeleteAsync(id, cancellationToken) ? NoContent() : NotFound();
+    public async Task<IActionResult> Delete(
+        string id,
+        [FromServices] ICommandHandler<DeleteClaimCommand, bool> handler,
+        CancellationToken cancellationToken) =>
+        await handler.HandleAsync(new DeleteClaimCommand(id), cancellationToken) ? NoContent() : NotFound();
 }

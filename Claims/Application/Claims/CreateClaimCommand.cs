@@ -8,7 +8,7 @@ namespace Claims.Application.Claims;
 /// <param name="Name">Short, human-readable name of the claim.</param>
 /// <param name="Type">What caused the damage.</param>
 /// <param name="DamageCost">The claimed cost of the damage. Cannot exceed 100,000.</param>
-public sealed record CreateClaimRequest(
+public sealed record CreateClaimCommand(
     string CoverId,
     DateTime Created,
     string Name,

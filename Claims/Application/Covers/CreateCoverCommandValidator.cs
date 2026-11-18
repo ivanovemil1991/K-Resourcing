@@ -2,10 +2,10 @@ using FluentValidation;
 
 namespace Claims.Application.Covers;
 
-/// <summary>Validates a <see cref="CreateCoverRequest"/>. "Today" comes from the injected clock.</summary>
-public sealed class CreateCoverRequestValidator : AbstractValidator<CreateCoverRequest>
+/// <summary>Validates a <see cref="CreateCoverCommand"/>. "Today" comes from the injected clock.</summary>
+public sealed class CreateCoverCommandValidator : AbstractValidator<CreateCoverCommand>
 {
-    public CreateCoverRequestValidator(TimeProvider timeProvider)
+    public CreateCoverCommandValidator(TimeProvider timeProvider)
     {
         RuleFor(cover => cover.Type).IsInEnum();
 
